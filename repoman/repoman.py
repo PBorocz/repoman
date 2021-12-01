@@ -5,6 +5,8 @@ import click
 
 import db
 from index import Index
+from query import query_ui
+
 from rich.console import Console
 from rich.table import Table
 
@@ -62,7 +64,7 @@ def index(dir, suffix, debug, force):
     click.echo(f"Indexing the database from: '{dir}'...")
     num_indexed = Index(db.get_db_conn()).index(debug, dir, suffix, force)
     if num_indexed:
-        click.echo(f"Indexed {num_indexed:,d} files.")
+        click.echo(f"Indexed {num_indexed:,d} file(s).")
     else:
         click.echo(f"No files to be indexed!")
 
@@ -74,35 +76,8 @@ def index(dir, suffix, debug, force):
     help='Query string...'
 )
 def query(string):
+    query_ui(string)
 
-    console = Console()
-    console.clear()
-    click.echo('Query string? (ctrl-D or exit<cr> to exit) -> ', nl=False)
-    while True:
-        try:
-            string = input()
-        except (KeyboardInterrupt, EOFError):
-            break               # Allow for clean interrupts..
-        if string.lower() == "exit":
-            break
-        if string:
-            results = db.query_db(string)
-            if results:
-                console.clear()
-                display_query_results(console, results)
-            else:
-                print(f"Sorry, nothing matched: '{string}'\n")
-        click.echo('Query string? (ctrl-D or exit<cr> to exit) -> ', nl=False)
-
-
-def display_query_results(console, results: list) -> None:
-
-    table = Table(show_header=True, header_style="bold")
-    table.add_column("Type", width=4)
-    table.add_column("Path")
-    for (path_, suffix) in results:
-        table.add_row(suffix, path_)
-    console.print(table)
 
 if __name__ == "__main__":
     main()

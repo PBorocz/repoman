@@ -1,6 +1,7 @@
+import datetime
 from collections import defaultdict
 from pathlib import Path
-from typing import Tuple, Iterable, List, Set
+from typing import Tuple, Iterable, List, Set, Dict
 
 import pdfplumber
 import sqlite3
@@ -32,6 +33,12 @@ def walker(path: Path, skip_dirs: list) -> Iterable[Path]:
         yield path_
 
 
+def get_last_mod(path_: Path) -> str:
+    """Utility method to return an ISO-8601 formatted last mod date of path specified."""
+    mtime = path_.stat().st_mtime
+    return datetime.datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+
+
 def filter_by_suffix(path_, suffix):
     if not suffix:
         # If we're not filtering by suffix, noop.
@@ -49,47 +56,63 @@ class Index:
     def __init__(self, conn):
         self.conn = conn
 
-    def get_paths_already_indexed(self) -> Set[Path]:
+    def get_paths_already_indexed(self) -> Dict[Path, str]:
+        """Return the paths and last-mod time of docs already indexed."""
         csr = self.conn.cursor()
-        query = """SELECT path FROM docs"""
-        csr.execute(query)
-        return {Path(row[0]) for row in csr.fetchall()}
+        query = """SELECT path, last_mod FROM docs"""
+        return {Path(row[0]) : row[1] for row in csr.execute(query).fetchall()}
 
     def get_paths_to_index(self, debug: bool, arg_dir: str, arg_suffix: str, arg_force: bool) -> Iterable:
         """Encapsulate all the logic regarding what files to be indexed,
         taking into account:
         - If we're filtering by suffix
         - If we're supposed to "reindex" files already indexed.
+        - If the file hasn't been modified from the last time we indexed it.
         - Directories to skip outright.
         """
-        path_dir  = Path(arg_dir).expanduser().resolve()
+        path_dir = Path(arg_dir).expanduser().resolve()
 
         all_paths = set(walker(path_dir, SKIP_DIRS))
         if debug:
-            print(f"{len(all_paths):4d} files potentially indexable.")
+            print(f"{len(all_paths):6,d} files potentially indexable.")
 
         files_to_index = {path_ for path_ in all_paths if filter_by_suffix(path_, arg_suffix)}
         if debug:
-            print(f"{len(files_to_index):4d} files that match suffix: {arg_suffix}.")
+            print(f"{len(files_to_index):6,d} files that match suffix: {arg_suffix}.")
 
-        if not arg_force:
-            # Unless we're forcing, only index those doc's that haven't already been processed.
+        if arg_force:
+            # Easy, index every file that passes our file "filters"!
+            paths_to_index = files_to_index
+        else:
+            # We're not "force" index, consider only those docs that
+            # a) Haven't been already indexed and
+            # b) Those that *have* been already indexed by have changed since we index them originally.
             paths_already_indexed = self.get_paths_already_indexed()
             if debug:
-                print(f"{len(paths_already_indexed):4d} documents already indexed")
+                print(f"{len(paths_already_indexed):6,d} documents already indexed.")
 
-            files_to_index -= paths_already_indexed
+            # a) Have we not indexed this file before?
+            paths_missing = files_to_index - set(list(paths_already_indexed.keys()))
             if debug:
-                print(f"{len(files_to_index):4d} documents to be indexed")
+                print(f"{len(paths_missing):6,d} documents to be indexed since we haven't indexed them before.")
 
-        if not files_to_index:
-            return None
+            # b) Has file has been modified more recently than our stored indexed version?
+            paths_updated = set()
+            for path_, lmod_doc in paths_already_indexed.items():
+                if get_last_mod(path_) > lmod_doc:
+                    paths_updated.add(path_)
+            if debug:
+                print(f"{len(paths_updated):6,d} documents have been updated since they were last indexed.")
 
+            paths_to_index = paths_missing.union(paths_updated)
+            if debug:
+                print(f"{len(paths_to_index):6,d} documents to be indexed.")
+
+        # Depending on the running, either decorate or not the list of paths
+        # to be indexed.
         if debug:
-            return files_to_index
-
-        # Non-debug mode, use a progress bar..
-        return track(files_to_index, description="Indexing...")
+            return paths_to_index
+        return track(paths_to_index, description="Indexing...")
 
 
     def index(self, debug: bool, arg_dir: str, arg_suffix: str, arg_force: bool) -> int:
@@ -123,11 +146,15 @@ class Index:
             return None
 
         body = body_method(path_)
+        lmod = get_last_mod(path_)
         if not body:
             return None
-        return self._upsert_doc(path_, suffix, body)
+        return self._upsert_doc(path_, suffix, body, lmod)
 
-    def _upsert_doc(self, path_, suffix, body):
+
+
+
+    def _upsert_doc(self, path_: Path, suffix: str, body: str, lmod: str) -> int:
         csr = self.conn.cursor()
 
         # Does this row exist already? If so, nuke it.
@@ -140,11 +167,17 @@ class Index:
         # Do the insert..
         cleansed = body.replace("'", '"')
         insert = f"""
-           INSERT INTO docs(path, suffix, body) VALUES(
-           '{path_}',
-           '{suffix}',
-           '{cleansed}'
-        )
+           INSERT INTO docs(
+              path,
+              suffix,
+              last_mod,
+              body
+           ) VALUES (
+              '{path_}',
+              '{suffix}',
+              '{lmod}',
+              '{cleansed}'
+           )
         """
         try:
             csr.execute(insert)
