@@ -8,6 +8,7 @@ authors = ["Peter Borocz <peter.borocz@gmail.com>"]
 python = "^3.9"
 rich = "^10.15.0"
 click = "^8.0.3"
+pdfplumber = "^0.5.28"
 
 [tool.poetry.dev-dependencies]
 pytest = "^5.2"
