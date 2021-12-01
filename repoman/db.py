@@ -52,6 +52,7 @@ def createdb():
 	suffix UNINDEXED,     -- eg. "org", or pdf, txt, py etc.
         last_mod UNINDEXED,   -- eg. 2021-11-29 or 2021-11-29T0929
         body,
+        tokenize='porter ascii'
     );
     ""","""
     CREATE TABLE IF NOT EXISTS tags (
@@ -70,6 +71,5 @@ def createdb():
     );
     """
     )
-    for statement in schema:
-        csr.execute(statement)
+    csr.executescript(schema)
     conn.commit()
