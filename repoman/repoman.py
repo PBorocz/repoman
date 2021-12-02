@@ -41,7 +41,7 @@ def dropdb():
 @main.command()
 @click.option(
     '--dir',
-    default="~/Repository/3.Resources",
+    default="~/Repository/4.Archives",
     type=click.Path(),
     help='Directory to start indexing from, default is'
 )

@@ -1,4 +1,6 @@
 import datetime
+import os
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Tuple, Iterable, List, Set, Dict
@@ -7,6 +9,9 @@ import pdfplumber
 import sqlite3
 from rich import print
 from rich.progress import track
+
+from db import upsert_doc
+
 
 SKIP_DIRS = (
     ".git",
@@ -17,6 +22,9 @@ SKIP_DIRS = (
     "__pycache__",
     "node_modules",
 )
+FILENAME_TAG_SEPARATOR = " -- "
+FILE_WITH_TAGS_REGEX   = re.compile(r'(.+?)' + FILENAME_TAG_SEPARATOR + r'(.+?)(\.(\w+))??$')
+YYYY_MM_DD_PATTERN     = re.compile(r'^(\d{4,4})-([01]\d)-([0123]\d)[- _T]')
 
 
 def walker(path: Path, skip_dirs: list) -> Iterable[Path]:
@@ -33,10 +41,40 @@ def walker(path: Path, skip_dirs: list) -> Iterable[Path]:
         yield path_
 
 
-def get_last_mod(path_: Path) -> str:
-    """Utility method to return an ISO-8601 formatted last mod date of path specified."""
-    mtime = path_.stat().st_mtime
-    return datetime.datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+def get_last_mod(path_: Path)-> str:
+    """Utility method to return last mod date:
+
+    - If the filepath conforms to the 'Novoid' filetagging syntax, we use any
+      explicitly-set last modification date.
+
+     -If not, we use the underlying OS' definition of last-mode datetime.
+    """
+    components = re.match(YYYY_MM_DD_PATTERN, path_.name)
+    if components:
+        yyyy, mm, dd = [components.group(1), components.group(2), components.group(3)]
+        return f"{yyyy}-{int(mm):02d}-{int(dd):02d} 00:00:00"
+
+    f_mtime = path_.stat().st_mtime
+    return datetime.datetime.fromtimestamp(f_mtime).strftime('%Y-%m-%d %H:%M:%S')
+
+
+def get_tags(path_: Path) -> List[str]:
+    """Utility method to return any tags embedded in the file path if the filepath conforms to
+    the 'Novoid' filetagging syntax, we can extract "tags".
+    """
+    # Cribbed from https://github.com/novoid/filetags/blob/master/filetags/__init__.py
+
+    # def split_up_filename(path: Path) -> Tuple:
+    #     dirname = os.path.dirname(os.path.abspath(path))
+    #     basename = os.path.basename(path)
+    #     return os.path.join(dirname, basename), dirname, basename
+
+    # filename, dirname, basename = split_up_filename(path_)
+
+    components = re.match(FILE_WITH_TAGS_REGEX, path_.name)
+    if components:
+        return components.group(2).split(' ')
+    return []
 
 
 def filter_by_suffix(path_, suffix):
@@ -146,45 +184,13 @@ class Index:
             return None
 
         body = body_method(path_)
-        lmod = get_last_mod(path_)
         if not body:
-            return None
-        return self._upsert_doc(path_, suffix, body, lmod)
+            return None         # If there's no text, we're done!
 
+        lmod = get_last_mod(path_)
+        tags = get_tags(path_)
 
-
-
-    def _upsert_doc(self, path_: Path, suffix: str, body: str, lmod: str) -> int:
-        csr = self.conn.cursor()
-
-        # Does this row exist already? If so, nuke it.
-        query = """SELECT path FROM docs WHERE path = ?"""
-        if csr.execute(query, (str(path_),)).fetchall():
-            delete = """DELETE FROM docs WHERE path = ?"""
-            csr.execute(delete, (str(path_),))
-            self.conn.commit()
-
-        # Do the insert..
-        cleansed = body.replace("'", '"')
-        insert = f"""
-           INSERT INTO docs(
-              path,
-              suffix,
-              last_mod,
-              body
-           ) VALUES (
-              '{path_}',
-              '{suffix}',
-              '{lmod}',
-              '{cleansed}'
-           )
-        """
-        try:
-            csr.execute(insert)
-        except sqlite3.OperationalError as err:
-            print(err)
-        self.conn.commit()
-        return csr.lastrowid
+        return upsert_doc(self.conn, path_, suffix, body, lmod, tags)
 
 
     def get_body_txt(self, path_, suffix="txt"):
