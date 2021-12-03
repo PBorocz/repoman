@@ -11,14 +11,17 @@ REPOMAN_PATH = CONFIG_PATH / Path("repoman")
 REPOMAN_DB = "repoman.db"
 DB_PATH = REPOMAN_PATH / Path(REPOMAN_DB)
 
+
 def _confirm_db_dir():
     if not CONFIG_PATH.exists():
         raise RuntimeError("Sorry, we expect a general '~/.config' directory!")
     if not REPOMAN_PATH.exists():
         REPOMAN_PATH.mkdir()
 
+
 def get_db_conn():
     return sqlite3.connect(DB_PATH)
+
 
 class SO:
     def __init__(self, *args, **kwargs):
@@ -26,7 +29,7 @@ class SO:
             setattr(self, k, v)
 
 
-def query_db(str_):
+def query(str_):
 
     # The snippet() function is similar to highlight(), except that instead of returning entire
     # column values, it automatically selects and extracts a short fragment of document text to
@@ -43,7 +46,8 @@ def query_db(str_):
     #    equal to or less than 64.
 
     def get_docs_from_fts(csr, str_:str) -> List[SO]:
-        sql = """SELECT snippet(docs, 3, '[green bold]', '/[green bold]', '...', 5),
+        sql = """SELECT rowid,
+                        snippet(docs, 3, '[green bold]', '/[green bold]', '...', 5),
                         path,
                         suffix,
                         last_mod,
@@ -55,9 +59,10 @@ def query_db(str_):
 
         docs = list()
         for idx, row in enumerate(csr.fetchall()):
-            snippet, s_path, suffix, last_mod, rank = row
+            doc_id, snippet, s_path, suffix, last_mod, rank = row
             path = Path(s_path)
             docs.append(SO(
+                doc_id   = doc_id,
                 rank     = f"{rank:.2f}",
                 path     = str(path.relative_to(*path.parts[:3])),
                 suffix   = suffix,
@@ -66,7 +71,7 @@ def query_db(str_):
                 ))
         return docs
 
-    def get_docs_from_tags(csr, tag: str) -> List[SO]:
+    def get_docs_from_tags(csr, docs: list, tag: str) -> List[SO]:
         # Do we have a tag for this?
         sql = "SELECT rowid FROM tags WHERE tag = ?"
         row = csr.execute(sql, (tag,)).fetchone()
@@ -80,8 +85,14 @@ def query_db(str_):
         if not rows:
             return []
 
+        # Get the doc_id's from those already queried (so we don't list any docs twice that
+        # match on text *and* tags!)
+        doc_ids = {doc.doc_id: True for doc in docs}
+
         docs = list()
         for (doc_id,) in rows:
+            if doc_id in doc_ids:
+                continue        # Dedup..
             query = """SELECT path, suffix, last_mod FROM docs WHERE rowid = ?"""
             s_path, suffix, last_mod = csr.execute(query, (doc_id,)).fetchone()
             path = Path(s_path)
@@ -95,7 +106,11 @@ def query_db(str_):
         return docs
 
     csr = get_db_conn().cursor()
-    return get_docs_from_tags(csr, str_) + get_docs_from_fts(csr, str_)
+
+    docs_from_fts  = get_docs_from_fts(csr, str_)
+    docs_from_tags = get_docs_from_tags(csr, docs_from_fts, str_)
+
+    return docs_from_tags + docs_from_fts
 
 
 def upsert_doc(
@@ -139,6 +154,7 @@ def upsert_doc(
     # Do we have any tags to handle?
     if tags:
         for tag in tags:
+            # Essentially and upsert on the "tag" value itself.
             query = "SELECT tag FROM tags WHERE tag = ?"
             if not csr.execute(query, (tag,)).fetchone():
                 sql = "INSERT INTO tags(tag) VALUES(?)"
@@ -156,23 +172,68 @@ def upsert_doc(
             csr.execute(sql, (tag_id, doc_id))
             conn.commit()
 
+    # Do we have any links to handle?
+    if links:
+        for (url, desc) in links:
+            # Update that we have this link embedded within this document (unless it exists already)
+            sql = "SELECT rowid FROM links_docs WHERE url=? AND doc_id=?"
+            if not csr.execute(sql, (url, doc_id)).fetchone():
+                sql = "INSERT INTO links_docs(doc_id, url, desc) VALUES(?, ?, ?)"
+                csr.execute(sql, (doc_id, url, desc))
+                conn.commit()
+
     return doc_id
 
 ################################################################################
-# Database Maintenance!
+# Database status and maintenance
 ################################################################################
-def cleardb():
+def status():
     conn = get_db_conn()
     csr = conn.cursor()
-    for table_ in ('tags_docs', 'docs', 'tags'):
+    return_ = SO()
+
+    # Documents...
+    query = "SELECT count(*) FROM docs"
+    return_.total_docs = csr.execute(query).fetchone()[0]
+
+    query = """SELECT suffix, count(*)
+                 FROM docs
+             GROUP BY suffix
+             ORDER BY count(*) DESC"""
+    return_.suffix_counts = csr.execute(query).fetchall()
+
+    # Tags...
+    query = "SELECT count(*) FROM tags"
+    return_.total_tags = csr.execute(query).fetchone()[0]
+
+    query = """SELECT tag, count(*)
+                 FROM tags_docs
+           INNER JOIN tags on tags.rowid = tags_docs.tag_id
+             GROUP BY tag_id
+             ORDER BY count(*) DESC"""
+    return_.tag_counts = csr.execute(query).fetchall()
+
+    # Links...
+    query = "SELECT count(*) FROM links_docs"
+    return_.total_links = csr.execute(query).fetchone()[0]
+
+    return return_
+
+
+def clear():
+    conn = get_db_conn()
+    csr = conn.cursor()
+    for table_ in ('links_docs', 'tags_docs', 'docs', 'tags'):
         csr.execute(f"DELETE FROM {table_}")
     conn.commit()
 
-def dropdb():
+
+def drop():
     if DB_PATH.exists():
         DB_PATH.unlink()
 
-def createdb():
+
+def create():
     """Create our database (in the user general config area)"""
     _confirm_db_dir()
     conn = get_db_conn()
@@ -185,19 +246,19 @@ def createdb():
         body,
         tokenize='porter ascii'
     );
-    ""","""
+
     CREATE TABLE IF NOT EXISTS tags (
 	tag TEXT PRIMARY KEY
     );
-    ""","""
+
     CREATE TABLE IF NOT EXISTS tags_docs (
 	tag_id INTEGER NOT NULL,
         doc_id INTEGER NOT NULL
     );
-    ""","""
-    CREATE TABLE IF NOT EXISTS links (
+
+    CREATE TABLE IF NOT EXISTS links_docs (
 	doc_id INTEGER NOT NULL,
-        link TEXT NOT NULL,
+        url TEXT NOT NULL,
         desc TEXT
     );
     """

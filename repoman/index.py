@@ -44,7 +44,7 @@ class Index:
     def get_paths_to_index(self, verbose: bool, arg_dir: str, arg_suffix: str, arg_force: bool) -> Iterable:
         """Encapsulate all the logic regarding what files to be indexed,
         taking into account:
-        - If we're filtering by suffix
+        - If we're filtering by suffix (here specified *without* the leading '.', e.g. pdf, org, text ...)
         - If we're supposed to "reindex" files already indexed.
         - If the file hasn't been modified from the last time we indexed it.
         - Directories to skip outright.
@@ -57,7 +57,7 @@ class Index:
 
         files_to_index = {path_ for path_ in all_paths if filter_by_suffix(path_, arg_suffix)}
         if verbose:
-            print(f"{len(files_to_index):6,d} files that match suffix: {arg_suffix}.")
+            print(f"{len(files_to_index):6,d} files that match suffix: {arg_suffix}")
 
         if arg_force:
             # Easy, index every file that passes our file "filters"!
@@ -122,6 +122,12 @@ class Index:
         elif suffix == "pdf":
             body_method = self.get_body_pdf
 
+        elif suffix == "pdf":
+            body_method = self.get_body_pdf
+
+        elif suffix in ("jpg", "png"):
+            ...
+
         else:
             # Keep track of the suffixes we're not dealing with right now..
             self.suffixes_skipped[suffix] += 1
@@ -133,6 +139,7 @@ class Index:
             # Even if we can't read the content, the file may still have tags and
             # we want to the filename to know we *tried* indexing it at least.
             body = ''
+            links = []
 
         lmod = get_last_mod(path_)
         tags = get_tags(path_)
@@ -142,14 +149,7 @@ class Index:
 
     def get_body_txt(self, path_, suffix="txt"):
         """Insert an index for a text file"""
-        # Find out what encoding to use first...
-        with open(path_, 'rb') as fh_:
-            rawdata = fh_.read()
-            result = chardet.detect(rawdata)
-            charenc = result['encoding']
-
-        # ...then we can open the file with an encoding that should work.
-        with open(path_, encoding=charenc) as fh_:
+        with open(path_, encoding=get_file_encoding(path_)) as fh_:
             return fh_.read(), None
 
 
@@ -157,7 +157,7 @@ class Index:
         """Insert an index for an org file"""
         text = []
         links = []
-        with open(path_, encoding=charenc) as fh_:
+        with open(path_, encoding=get_file_encoding(path_)) as fh_:
             for line in fh_.readlines():
 
                 text.append(copy(line))  # We're going to modify line below..
@@ -166,8 +166,8 @@ class Index:
                 while '[[' in line:
                     # 'asdasdfsd [[https:/www.google.com][Google search]] asdf asdf asdf
                     # 'asdasdfsd [[https:/www.google.com]] asdf asdf asdf
-                    _, rest = line.split('[[')
-                    url_desc, rest = rest.split(']]')
+                    _, rest = line.split('[[', 1)
+                    url_desc, rest = rest.split(']]', 1)
                     if '][' in url_desc:
                         # [[https:/www.google.com][Google search]]
                         url, desc = url_desc.split('][')
@@ -175,8 +175,11 @@ class Index:
                         # [[https:/www.google.com]]
                         url, desc = url_desc, None
                     links.append((url, desc))
-
-                    _, line = line.split(']]')  # Any more on the line?
+                    try:
+                        _, line = line.split(']]', 1)  # Any more on the line?
+                    except ValueError as err:
+                        print(err)
+                        breakpoint()
 
         return ' '.join(text), links
 
@@ -195,6 +198,12 @@ class Index:
 ################################################################################
 # Utility methods
 ################################################################################
+def get_file_encoding(path_: Path) -> str:
+    with open(path_, 'rb') as fh_:
+        rawdata = fh_.read(10_000)
+        result = chardet.detect(rawdata)
+        return result['encoding']
+    return None
 
 
 def walker(path: Path, skip_dirs: list) -> Iterable[Path]:
@@ -208,6 +217,11 @@ def walker(path: Path, skip_dirs: list) -> Iterable[Path]:
                 continue
             yield p.resolve()
     for path_ in _walk(path):
+
+        # Skip ".*" files!
+        if path_.name.startswith("."):
+            continue
+
         yield path_
 
 
@@ -240,14 +254,15 @@ def get_tags(path_: Path) -> List[str]:
     return []
 
 
-def filter_by_suffix(path_, suffix):
+def filter_by_suffix(path_, suffix: str) -> bool:
+    """Does the path's suffix match that of the optional suffix specified?"""
     if not suffix:
-        # If we're not filtering by suffix, noop.
-        return True
+        return True   # If we're not filtering by suffix, noop.
+
     if not path_.suffix:
-        # We are filtering but this file has no suffix, noop
-        return False
-    if suffix.lower() == path_.suffix.lower():
-        # We are filtering and the suffix of this path matches the suffix requested.
-        return True
+        return False  # We are filtering but this file has no suffix, noop
+
+    if suffix.lower() == path_.suffix.lower()[1:]:
+        return True   # We are filtering and the suffix of this path matches the suffix requested.
+
     return False
