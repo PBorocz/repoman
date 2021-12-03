@@ -22,19 +22,37 @@ def main():
 
 # ###############################################################################
 @main.command()
-def createdb():
-    db.createdb()
-    click.echo('Created the database...')
+@click.option(
+    '--yes',
+    is_flag=True,
+    callback=abort_if_false,
+    expose_value=False,
+    prompt='Are you sure you want to clear the database?'
+)
+def cleardb():
+    db.cleardb()
+    click.echo('Database cleared.')
 
 
 # ###############################################################################
 @main.command()
-@click.option('--yes', is_flag=True, callback=abort_if_false,
-              expose_value=False,
-              prompt='Are you sure you want to drop the db?')
+@click.option(
+    '--yes',
+    is_flag=True,
+    callback=abort_if_false,
+    expose_value=False,
+    prompt='Are you sure you want to drop the database?'
+)
 def dropdb():
     db.dropdb()
-    click.echo('Dropped the database')
+    click.echo('Database dropped.')
+
+
+# ###############################################################################
+@main.command()
+def createdb():
+    db.createdb()
+    click.echo('Database created.')
 
 
 # ###############################################################################
@@ -51,23 +69,25 @@ def dropdb():
     help='File suffixes to index, eg. txt, org, pdf ...'
 )
 @click.option(
-    '--debug/--no-debug',
+    '--verbose/--no-verbose',
     default=False,
-    help='Debug mode?'
+    help='Verbose mode?'
 )
 @click.option(
     '--force/--no-force',
     default=False,
     help='Force updates if document has already been indexed?'
 )
-def index(dir, suffix, debug, force):
+def index(dir, suffix, verbose, force):
     click.echo(f"Indexing the database from: '{dir}'...")
-    num_indexed = Index(db.get_db_conn()).index(debug, dir, suffix, force)
+    indexer = Index(db.get_db_conn())
+    num_indexed = indexer.index(verbose, dir, suffix, force)
     if num_indexed:
         click.echo(f"Indexed {num_indexed:,d} file(s).")
     else:
         click.echo(f"No files to be indexed!")
-
+    if verbose:
+        Console().print(indexer.suffixes_skipped)
 
 # ###############################################################################
 @main.command()

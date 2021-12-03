@@ -98,25 +98,35 @@ def query_db(str_):
     return get_docs_from_tags(csr, str_) + get_docs_from_fts(csr, str_)
 
 
-def upsert_doc(conn, path_: Path, suffix: str, body: str, lmod: str, tags: List[str]) -> int:
+def upsert_doc(
+        conn,
+        path_: Path,
+        suffix: str,
+        body: str,
+        lmod: str,
+        tags: List[str],
+        links: List[str]) -> int:
+
     csr = conn.cursor()
 
-    def check_delete_existing(path_: Path) -> None:
+    def check_delete_existing(csr, path_: Path) -> None:
         """Does a row exist already for this path? If so, nuke it."""
         sql = "SELECT rowid FROM docs WHERE path = ?"
         row = csr.execute(sql, (str(path_),)).fetchone()
-        if doc_id := row[0]:
-            sql = "DELETE FROM docs WHERE rowid = ?"
-            csr.execute(sql, (doc_id,))
+        if not row:
+            return
+        doc_id = row[0]
+        sql = "DELETE FROM docs WHERE rowid = ?"
+        csr.execute(sql, (doc_id,))
 
-            sql = "DELETE FROM tags_docs WHERE doc_id = ?"
-            csr.execute(sql, (doc_id,))
-            conn.commit()
+        sql = "DELETE FROM tags_docs WHERE doc_id = ?"
+        csr.execute(sql, (doc_id,))
+        conn.commit()
 
     # Clean out any existing row!
-    check_delete_existing(path_)
+    check_delete_existing(csr, path_)
 
-    # Do the insert..
+    # Do the insert..(note that body could be essentially empty, ie. '')
     cleansed = body.replace("'", '"')
     sql = "INSERT INTO docs(path, suffix, last_mod, body) VALUES (?, ?, ?, ?)"
     try:
@@ -151,6 +161,13 @@ def upsert_doc(conn, path_: Path, suffix: str, body: str, lmod: str, tags: List[
 ################################################################################
 # Database Maintenance!
 ################################################################################
+def cleardb():
+    conn = get_db_conn()
+    csr = conn.cursor()
+    for table_ in ('tags_docs', 'docs', 'tags'):
+        csr.execute(f"DELETE FROM {table_}")
+    conn.commit()
+
 def dropdb():
     if DB_PATH.exists():
         DB_PATH.unlink()
@@ -162,7 +179,7 @@ def createdb():
     csr = conn.cursor()
     schema = ("""
     CREATE VIRTUAL TABLE docs USING fts5(
-	path     UNINDEXED,   -- eg. ~/Repository/1.Projects/lapswim_timemap
+	path,                 -- eg. ~/Repository/1.Projects/lapswim_timemap
 	suffix   UNINDEXED,   -- eg. "org", or pdf, txt, py etc.
         last_mod UNINDEXED,   -- eg. 2021-11-29 or 2021-11-29T0929
         body,
