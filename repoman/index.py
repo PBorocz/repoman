@@ -89,8 +89,8 @@ class Index:
 
         # Depending on the running, either decorate or not the list of paths
         # to be indexed.
-        if verbose:
-            return paths_to_index
+        # if verbose:
+        #     return paths_to_index
         return track(paths_to_index, description="Indexing...")
 
 
@@ -109,7 +109,6 @@ class Index:
         return count_indexed
 
     def _index(self, path_):
-        print(path_)
         suffix = path_.suffix.lower()[1:]
 
         # FIXME: Good case for new "match" semantic?
