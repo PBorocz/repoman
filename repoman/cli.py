@@ -3,17 +3,20 @@ import sys
 import inspect
 
 import click
-from rich import print, box
+from prompt_toolkit import PromptSession, prompt
+from prompt_toolkit.history import FileHistory
+from pyfiglet import Figlet
+from rich import box
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
 import db
 from index import Index
+from utils import get_user_history_path
 
-
-FIRST_PROMPT = "Welcome to RepoMan (ctrl-D, '.exit' or '.q' to exit) -> "
-SUBSEQUENT_PROMPT = 'repoman> '
+INTRODUCTION = "Welcome to RepoMan! ctrl-D, '.exit/.q' to exit, .help for help."
+PROMPT = 'repoman> '
 
 # Primary CLI/UI for repoman
 @click.command()
@@ -21,39 +24,49 @@ SUBSEQUENT_PROMPT = 'repoman> '
 def cli(verbose: bool) -> None:
     console = Console()
     console.clear()
-    print(FIRST_PROMPT, end='')
+    
+    print(Figlet(font='standard').renderText('Repo-Man'))
+    print(INTRODUCTION)
+
+    # Create prompt session to allow commands over sessions.
+    session = PromptSession(history=FileHistory(get_user_history_path()))
+    
     while True:
         try:
-            command = input()
+            response = session.prompt(PROMPT)
         except (KeyboardInterrupt, EOFError):
             break
 
-        if command.lower() in (".exit", ".q"):
+        if response.lower() in (".exit", ".q"):
             break
 
-        if command:
-            # DO IT!
-            dispatch(verbose, command)
+        # As Ahnold would say...DOO EET!
+        if response:
+            execute(verbose, response)
 
-        print(SUBSEQUENT_PROMPT, end='')
-
-def dispatch(verbose: bool, command: str) -> bool:
+            
+def execute(verbose: bool, response: str) -> bool:
+    """Execute the "response" provided, determining whether or not
+    it's a "command" or "simply" a query to be executed."""
     # Look for command before assuming a query...
     console = Console()
-    if command.startswith('.'):
-        s_method = command[1:]
+    if response.startswith('.'):
+        # It's a *command*...
+        s_method = response[1:]
         try:
             method = globals()[f"command_{s_method}"]
         except KeyError:
-            print(f"Sorry, [red bold]{command}[/red bold] is not a known command (.help to list them)")
+            console.print(f"Sorry, [red bold]{response}[/red bold] is not a known command (.help to list them)")
             return False
         return method(console, verbose)
     else:
-        # Otherwise, we do a query!
-        query(console, command)
+        # Otherwise, we assume "response" represents a query!
+        query(console, response)
 
+        
 def query(console, query_string: str) -> None:
-
+    """Execute a query against the doc store"""
+    
     def _display_query_results(console, results: list) -> None:
         table = Table(show_header=True, header_style="bold")
         table.add_column("Snippet")
@@ -72,7 +85,7 @@ def query(console, query_string: str) -> None:
         console.clear()
         _display_query_results(console, results)
     else:
-        print(f"Sorry, nothing matched: [italic]'{query_string}'[/italic]\n")
+        console.print(f"Sorry, nothing matched: [italic]'{query_string}'[/italic]\n")
 
 ################################################################################
 # Management commands 
@@ -129,21 +142,11 @@ def command_index(console, verbose: bool) -> None:
     """Index a set of files (by root directory and/or suffix)"""
     indexer = Index(db.get_db_conn())
 
-    default = "~/Repository/4.Archives"
-    print(f'Root directory? ({default}) > ', end='')
-    dir = input()
-    if not dir:
-        dir = default
-
-    default = "txt"
-    print(f'Suffix? ({default}) > ', end='')
-    suffix = input()
-    if not suffix:
-        suffix = default
-
-    default = False
-    print(f'Force? ({default}) > ', end='')
-    s_force = input()
+    dir = prompt(f'Root directory? > ', default="~/Repository/3.Resources")
+    
+    suffix = prompt(f'Suffix? > ', default="txt")
+    
+    s_force = prompt(f'Force? > ', default="False")
     if s_force:
         b_force = False if s_force.lower().startswith('fa') else True
     else:
@@ -151,9 +154,9 @@ def command_index(console, verbose: bool) -> None:
 
     num_indexed = indexer.index(True, dir, suffix, b_force)
     if num_indexed:
-        print(f"Successfully indexed [bold]{num_indexed:,d}[/bold] file(s).")
+        console.print(f"Successfully indexed [bold]{num_indexed:,d}[/bold] file(s).")
     else:
-        print("[bold]No[/bold] files indexed.")
+        console.print("[bold]No[/bold] files indexed.")
             
 def command_help(console, verbose: bool):
     """Display the list of all commands available"""

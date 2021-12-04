@@ -109,6 +109,7 @@ class Index:
         return count_indexed
 
     def _index(self, path_):
+        print(path_)
         suffix = path_.suffix.lower()[1:]
 
         # FIXME: Good case for new "match" semantic?
@@ -155,31 +156,26 @@ class Index:
 
     def get_body_org(self, path_, suffix="org"):
         """Insert an index for an org file"""
-        text = []
+        text  = []
         links = []
-        with open(path_, encoding=get_file_encoding(path_)) as fh_:
-            for line in fh_.readlines():
+        encoding = get_file_encoding(path_)
+        try:
+            with open(path_, encoding=encoding, errors='ignore') as fh_:
+                for lineno, line in enumerate(fh_, 1):
+                    clean = line.strip()
 
-                text.append(copy(line))  # We're going to modify line below..
+                    # Core text capture for filtering..
+                    if clean:
+                        text.append(clean)
 
-                # The only extra thing we look for from org files are links
-                while '[[' in line:
-                    # 'asdasdfsd [[https:/www.google.com][Google search]] asdf asdf asdf
-                    # 'asdasdfsd [[https:/www.google.com]] asdf asdf asdf
-                    _, rest = line.split('[[', 1)
-                    url_desc, rest = rest.split(']]', 1)
-                    if '][' in url_desc:
-                        # [[https:/www.google.com][Google search]]
-                        url, desc = url_desc.split('][')
-                    else:
-                        # [[https:/www.google.com]]
-                        url, desc = url_desc, None
-                    links.append((url, desc))
-                    try:
-                        _, line = line.split(']]', 1)  # Any more on the line?
-                    except ValueError as err:
-                        print(err)
-                        breakpoint()
+                    # Additionally, look for links..
+                    links = get_org_links(path_, lineno, line.strip())
+
+        except UnicodeDecodeError as err:
+            print(path_)
+            print(encoding)
+            print(err)
+            breakpoint()
 
         return ' '.join(text), links
 
@@ -200,7 +196,7 @@ class Index:
 ################################################################################
 def get_file_encoding(path_: Path) -> str:
     with open(path_, 'rb') as fh_:
-        rawdata = fh_.read(10_000)
+        rawdata = fh_.read()
         result = chardet.detect(rawdata)
         return result['encoding']
     return None
@@ -266,3 +262,48 @@ def filter_by_suffix(path_, suffix: str) -> bool:
         return True   # We are filtering and the suffix of this path matches the suffix requested.
 
     return False
+
+def get_org_links(path_: Path, lineno: int, line: str) -> List[str]:
+    """The only extra thing we look for from org files are links.
+    A set of primary cases here:
+    - asdasdfsd [[https:/www.google.com][Google search]] asdf asdf asdf
+    - asdasdfsd [[https:/www.google.com]] asdf asdf asdf
+    - asdasdfsd [[https:/www.google.com]] asdasdfsd [[https:/www.foo.org][another site]] asdf asdf asdf
+    """
+    return_ = list()
+
+    while '[[' in line:
+        _, rest = line.split('[[', 1)
+        try:
+            url_desc, rest = rest.split(']]', 1)
+        except ValueError as err:
+            print(path_)
+            print(f"{lineno:,d}")
+            print(line)
+            print(err)
+            return None
+
+        if '][' in url_desc:
+            # [[https:/www.google.com][Google search]]
+            try:
+                url, desc = url_desc.split('][')
+            except ValueError as err:
+                print(path_)
+                print(f"{lineno:,d}")
+                print(line)
+                print(err)
+                return None
+        else:
+            # [[https:/www.google.com]]
+            url, desc = url_desc, None
+        return_.append((url, desc))
+        try:
+            _, line = line.split(']]', 1)  # Any more on the line?
+        except ValueError as err:
+            print(path_)
+            print(f"{lineno:,d}")
+            print(line)
+            print(err)
+            return None
+
+    return return_
