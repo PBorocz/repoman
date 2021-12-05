@@ -8,16 +8,18 @@ from copy import copy
 from pathlib import Path
 from typing import Tuple, Iterable, List, Set, Dict
 
-import pdfplumber
 import sqlite3
+from pdfminer.high_level import extract_text
 from rich import print
 from rich.progress import track
 
-from db import upsert_doc
+from db import upsert_doc, get_paths_already_indexed
+from utils import AnonymousObj, progressIndicator
 
 
 SKIP_DIRS = (
     ".git",
+    ".hg",
     ".venv",
     "venv",
     "_vm",
@@ -25,6 +27,17 @@ SKIP_DIRS = (
     "__pycache__",
     "node_modules",
 )
+
+INCLUDE_EXTENSIONS = (
+    ".txt",
+    ".org",
+    ".gif",
+    ".pdf",
+    ".mp4", ".mov",
+    ".jpg", ".jepg", ".jpg_large",
+    ".png",
+)
+
 FILENAME_TAG_SEPARATOR = " -- "
 FILE_WITH_TAGS_REGEX   = re.compile(r'(.+?)' + FILENAME_TAG_SEPARATOR + r'(.+?)(\.(\w+))??$')
 YYYY_MM_DD_PATTERN     = re.compile(r'^(\d{4,4})-([01]\d)-([0123]\d)[- _T]')
@@ -33,15 +46,25 @@ YYYY_MM_DD_PATTERN     = re.compile(r'^(\d{4,4})-([01]\d)-([0123]\d)[- _T]')
 class Index:
     def __init__(self, conn):
         self.conn = conn
-        self.suffixes_skipped = defaultdict(int)
 
-    def get_paths_already_indexed(self) -> Dict[Path, str]:
-        """Return the paths and last-mod time of docs already indexed."""
-        csr = self.conn.cursor()
-        query = """SELECT path, last_mod FROM docs"""
-        return {Path(row[0]) : row[1] for row in csr.execute(query).fetchall()}
+    def index(self, verbose: bool, arg_dir: str, arg_suffix: str, arg_force: bool) -> int:
+        """
+        CORE METHOD: Get an iterator of files to be indexed and return the number that worked.
+        """
+        iterator = self.iter_paths_to_index(
+            verbose,
+            Path(arg_dir).expanduser().resolve(),
+            arg_suffix, arg_force)
+        pi = progressIndicator(level="low")
+        ith = 0
+        for ith, path_ in enumerate(iterator, 1):
+            self._index(path_)
+            pi.update()
+        pi.final()
+        return ith
 
-    def get_paths_to_index(self, verbose: bool, arg_dir: str, arg_suffix: str, arg_force: bool) -> Iterable:
+
+    def iter_paths_to_index(self, verbose: bool, path_dir: Path, arg_suffix: str, arg_force: bool) -> Iterable:
         """Encapsulate all the logic regarding what files to be indexed,
         taking into account:
         - If we're filtering by suffix (here specified *without* the leading '.', e.g. pdf, org, text ...)
@@ -49,112 +72,64 @@ class Index:
         - If the file hasn't been modified from the last time we indexed it.
         - Directories to skip outright.
         """
-        path_dir = Path(arg_dir).expanduser().resolve()
+        # Before we start, what files have already been index?
+        paths_already_indexed = get_paths_already_indexed(self.conn)
 
-        all_paths = set(walker(path_dir, SKIP_DIRS))
-        if verbose:
-            print(f"{len(all_paths):6,d} files potentially indexable.")
+        for path_ in walker(path_dir, arg_suffix, SKIP_DIRS, INCLUDE_EXTENSIONS):
+            if arg_force:
+                yield path_  # Easy, index every file that passes our file "filters"!
 
-        files_to_index = {path_ for path_ in all_paths if filter_by_suffix(path_, arg_suffix)}
-        if verbose:
-            print(f"{len(files_to_index):6,d} files that match suffix: {arg_suffix}")
+            # Have we not indexed this file before?
+            is_path_not_indexed = path_ not in paths_already_indexed
 
-        if arg_force:
-            # Easy, index every file that passes our file "filters"!
-            paths_to_index = files_to_index
-        else:
-            # We're not "force" index, consider only those docs that
-            # a) Haven't been already indexed and
-            # b) Those that *have* been already indexed by have changed since we index them originally.
-            paths_already_indexed = self.get_paths_already_indexed()
-            if verbose:
-                print(f"{len(paths_already_indexed):6,d} documents already indexed.")
+            # Has file has been modified more recently than our stored indexed version?
+            lmod_doc = paths_already_indexed.get(path_, None)
+            has_doc_been_updated = get_last_mod(path_) > lmod_doc if lmod_doc else None
 
-            # a) Have we not indexed this file before?
-            paths_missing = files_to_index - set(list(paths_already_indexed.keys()))
-            if verbose:
-                print(f"{len(paths_missing):6,d} documents to be indexed since we haven't indexed them before.")
+            # Decide to take/not take the path under consideration
+            if is_path_not_indexed:
+                yield path_  # Easy case, we haven't seen it yet!
+            else:
+                # We've already seen it...but...
+                # has it been updated since we last indexed it?
+                if has_doc_been_updated:
+                    yield path_
 
-            # b) Has file has been modified more recently than our stored indexed version?
-            paths_updated = set()
-            for path_, lmod_doc in paths_already_indexed.items():
-                if get_last_mod(path_) > lmod_doc:
-                    paths_updated.add(path_)
-            if verbose:
-                print(f"{len(paths_updated):6,d} documents have been updated since they were last indexed.")
-
-            paths_to_index = paths_missing.union(paths_updated)
-            if verbose:
-                print(f"{len(paths_to_index):6,d} documents to be indexed.")
-
-        # Depending on the running, either decorate or not the list of paths
-        # to be indexed.
-        # if verbose:
-        #     return paths_to_index
-        return track(paths_to_index, description="Indexing...")
-
-
-    def index(self, verbose: bool, arg_dir: str, arg_suffix: str, arg_force: bool) -> int:
-        """
-        CORE METHOD: Get an iterator of files to be indexed and return the number that worked.
-        """
-        iterator = self.get_paths_to_index(verbose, arg_dir, arg_suffix, arg_force)
-        if not iterator:
-            return None
-
-        count_indexed = 0
-        for path_ in iterator:
-            if self._index(path_):
-                count_indexed += 1
-        return count_indexed
 
     def _index(self, path_):
-        suffix = path_.suffix.lower()[1:]
+        """Index the file on the specified path!"""
+        so_doc = AnonymousObj(
+            path_  = path_,
+            suffix = path_.suffix.lower()[1:],
+            body   = '',                  # Assume empty until we can pull anything out...
+            links  = [],                  # "
+            lmod   = get_last_mod(path_), # When was the file tagged or last modified?
+            tags   = get_tags(path_),     # What are any file-specific (ie. Novoid) tags?
+        )
 
-        # FIXME: Good case for new "match" semantic?
-        body_method = None
-        if suffix == "txt":
-            body_method = self.get_body_txt
+        # For specific extensions that we *can* get meaningful text from,
+        # find the specific method to do so and get it!
+        get_text_method = dict(
+            txt = self.get_text_from_txt,
+            org = self.get_text_from_org,
+            pdf = self.get_text_from_pdf,
+        ).get(so_doc.suffix)
 
-        elif suffix == "org":
-            body_method = self.get_body_org
+        if get_text_method:
+            so_doc.body, so_doc.links = get_text_method(path_)
 
-        elif suffix == "pdf":
-            body_method = self.get_body_pdf
-
-        elif suffix == "pdf":
-            body_method = self.get_body_pdf
-
-        elif suffix in ("jpg", "png"):
-            ...
-
-        else:
-            # Keep track of the suffixes we're not dealing with right now..
-            self.suffixes_skipped[suffix] += 1
-            return None
-
-        if body_method:
-            body, links = body_method(path_)
-        else:
-            # Even if we can't read the content, the file may still have tags and
-            # we want to the filename to know we *tried* indexing it at least.
-            body = ''
-            links = []
-
-        lmod = get_last_mod(path_)
-        tags = get_tags(path_)
-
-        return upsert_doc(self.conn, path_, suffix, body, lmod, tags, links)
+        # Update/insert the doc into our database
+        return upsert_doc(self.conn, so_doc)
 
 
-    def get_body_txt(self, path_, suffix="txt"):
-        """Insert an index for a text file"""
+    def get_text_from_txt(self, path_, suffix="txt"):
+        """Get text from a txt file"""
         with open(path_, encoding=get_file_encoding(path_)) as fh_:
             return fh_.read(), None
 
 
-    def get_body_org(self, path_, suffix="org"):
-        """Insert an index for an org file"""
+    def get_text_from_org(self, path_, suffix="org"):
+        """Get text and links from an org file"""
         text  = []
         links = []
         encoding = get_file_encoding(path_)
@@ -179,15 +154,9 @@ class Index:
         return ' '.join(text), links
 
 
-    def get_body_pdf(self, path_, suffix="pdf"):
-        """Insert an index for an pdf file"""
-        with pdfplumber.open(path_) as pdf:
-            text = []
-            for ith, page in enumerate(pdf.pages, 1):
-                page_text = page.extract_text()
-                if page_text:
-                    text.append(page_text)
-        return ' '.join(text), None
+    def get_text_from_pdf(self, path_, suffix="pdf"):
+        """Get text from a pdf file"""
+        return extract_text(path_), None
 
 
 ################################################################################
@@ -201,23 +170,27 @@ def get_file_encoding(path_: Path) -> str:
     return None
 
 
-def walker(path: Path, skip_dirs: list) -> Iterable[Path]:
+def walker(arg_path: Path, arg_suffix: str, skip_dirs: list[str], include_suffixes: list[str]) -> Iterable[Path]:
     """Return all files recursively from the specified path on down, skipping any directories
-    specified.
+    specified and filtering by suffix explicitly if provided or implicitly based on built-in
+    list of suffixes we're supporting indexing on behalf of.
     """
-    def _walk(path):
-        for p in Path(path).iterdir():
-            if p.is_dir() and p.name not in skip_dirs:
-                yield from _walk(p)
+    def _walk(walk_path):
+        for path_ in Path(walk_path).iterdir():
+            if path_.is_dir() and path_.name not in skip_dirs:
+                yield from _walk(path_)
                 continue
-            yield p.resolve()
-    for path_ in _walk(path):
+            yield path_
 
-        # Skip ".*" files!
-        if path_.name.startswith("."):
-            continue
-
-        yield path_
+    for path_ in _walk(arg_path):
+        if arg_suffix:
+            # We're filtering by suffix (inclusive!)
+            if arg_suffix.lower() == path_.suffix.lower()[1:]:
+                yield path_
+        else:
+            # No suffix preference...still, only include files that we're explicitly indexing
+            if path_.suffix.lower() in include_suffixes:
+                yield path_
 
 
 def get_last_mod(path_: Path)-> str:
@@ -248,19 +221,6 @@ def get_tags(path_: Path) -> List[str]:
         return components.group(2).split(' ')
     return []
 
-
-def filter_by_suffix(path_, suffix: str) -> bool:
-    """Does the path's suffix match that of the optional suffix specified?"""
-    if not suffix:
-        return True   # If we're not filtering by suffix, noop.
-
-    if not path_.suffix:
-        return False  # We are filtering but this file has no suffix, noop
-
-    if suffix.lower() == path_.suffix.lower()[1:]:
-        return True   # We are filtering and the suffix of this path matches the suffix requested.
-
-    return False
 
 def get_org_links(path_: Path, lineno: int, line: str) -> List[str]:
     """The only extra thing we look for from org files are links.

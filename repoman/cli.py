@@ -1,6 +1,7 @@
 #!/usr/bin/env py
 import sys
 import inspect
+from pathlib import Path
 
 import click
 from prompt_toolkit import PromptSession, prompt
@@ -12,6 +13,8 @@ from rich.table import Table
 from rich.text import Text
 
 import db
+from sqlite3 import Connection
+
 from index import Index
 from utils import get_user_history_path
 
@@ -22,8 +25,10 @@ PROMPT = 'repoman> '
 @click.command()
 @click.option('--verbose/--no-verbose', default=False, help='Verbose mode?')
 def cli(verbose: bool) -> None:
+    
     console = Console()
     console.clear()
+    con = db.get_db_conn()
     
     print(Figlet(font='standard').renderText('Repo-Man'))
     print(INTRODUCTION)
@@ -42,13 +47,14 @@ def cli(verbose: bool) -> None:
 
         # As Ahnold would say...DOO EET!
         if response:
-            execute(verbose, response)
+            execute(verbose, con, response)
 
             
-def execute(verbose: bool, response: str) -> bool:
+def execute(verbose: bool, con: Connection, response: str) -> bool:
     """Execute the "response" provided, determining whether or not
     it's a "command" or "simply" a query to be executed."""
     # Look for command before assuming a query...
+
     console = Console()
     if response.startswith('.'):
         # It's a *command*...
@@ -58,13 +64,13 @@ def execute(verbose: bool, response: str) -> bool:
         except KeyError:
             console.print(f"Sorry, [red bold]{response}[/red bold] is not a known command (.help to list them)")
             return False
-        return method(console, verbose)
+        return method(console, con, verbose)
     else:
         # Otherwise, we assume "response" represents a query!
-        query(console, response)
+        query(console, con, response)
 
         
-def query(console, query_string: str) -> None:
+def query(console: Console, con: Connection, query_string: str) -> None:
     """Execute a query against the doc store"""
     
     def _display_query_results(console, results: list) -> None:
@@ -80,7 +86,7 @@ def query(console, query_string: str) -> None:
             )
         console.print(table)
     
-    results = db.query(query_string)
+    results = db.query(con, query_string)
     if results:
         console.clear()
         _display_query_results(console, results)
@@ -90,27 +96,27 @@ def query(console, query_string: str) -> None:
 ################################################################################
 # Management commands 
 ################################################################################
-def command_createdb(console, verbose: bool) -> None:
+def command_createdb(console: Console, con: Connection, verbose: bool) -> None:
     """Create the schema in an existing database (requires confirmation)"""
-    db.create()
+    db.create(con)
     console.print(f"Database [bold]created[/bold].")
 
     
-def command_dropdb(console, verbose: bool) -> None:
+def command_dropdb(console: Console, con: Connection, verbose: bool) -> None:
     """Delete the database (requires confirmation)"""
-    db.drop()
+    db.drop(con)
     console.print(f"Database [bold]dropped[/bold].")
 
     
-def command_cleardb(console, verbose: bool) -> None:
+def command_cleardb(console: Console, con: Connection, verbose: bool) -> None:
     """Clean out the database of all data (requires confirmation)"""
-    db.clear()
+    db.clear(con)
     console.print(f"Database [bold]cleared[/bold].")
 
     
-def command_status(console, verbose: bool) -> None:
+def command_status(console: Console, con: Connection, verbose: bool) -> None:
     """Display the status of the database"""
-    status = db.status()
+    status = db.status(con)
     
     if not status.total_docs:
         console.print("[bold italic]No[/bold italic] documents have been indexed yet, database is empty.")
@@ -138,12 +144,15 @@ def command_status(console, verbose: bool) -> None:
         console.print(f"Total links extracted from org files: [bold]{status.total_links:,d}[/bold]")
 
         
-def command_index(console, verbose: bool) -> None:
+def command_index(console: Console, con: Connection, verbose: bool) -> bool:
     """Index a set of files (by root directory and/or suffix)"""
-    indexer = Index(db.get_db_conn())
+    indexer = Index(con)
 
-    dir = prompt(f'Root directory? > ', default="~/Repository/3.Resources")
-    
+    dir = prompt(f'Root directory? > ', default="~/Repository")
+    if not Path(dir).expanduser().exists():
+        print(f"Sorry, {dir} does not exist")
+        return False
+        
     suffix = prompt(f'Suffix? > ', default="txt")
     
     s_force = prompt(f'Force? > ', default="False")
@@ -157,8 +166,9 @@ def command_index(console, verbose: bool) -> None:
         console.print(f"Successfully indexed [bold]{num_indexed:,d}[/bold] file(s).")
     else:
         console.print("[bold]No[/bold] files indexed.")
-            
-def command_help(console, verbose: bool):
+    return True
+        
+def command_help(console: Console, con: Connection, verbose: bool):
     """Display the list of all commands available"""
 
     command_funcs = [obj for name,obj in inspect.getmembers(sys.modules[__name__]) 
@@ -171,15 +181,8 @@ def command_help(console, verbose: bool):
     table = Table(show_header=False)
     table.add_column("Command")
     table.add_column("Explanation")
-
-    # FIXME: Make this list dynamic by going through globals and finding all functions that
-    # match 'command_*' and using their docstring as the help.
     for command in sorted(commands):
         table.add_row(*command)
-    # table.add_row(".help", "Display the list of all commands available")
-    # table.add_row(".index", "Index a set of files (by directory and/or suffix)")
-    # table.add_row(".createdb", "Empty the database and recreate it's schema from scratch (requires confirmation)")
-    # table.add_row(".dropdb", "Delete the database (requires confirmation)")
     console.print(table)
 
 
