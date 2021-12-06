@@ -47,21 +47,27 @@ class Index:
     def __init__(self, conn):
         self.conn = conn
 
-    def index(self, verbose: bool, arg_dir: str, arg_suffix: str, arg_force: bool) -> int:
+    def index(self, verbose: bool, index_command: AnonymousObj) -> int:
         """
         CORE METHOD: Get an iterator of files to be indexed and return the number that worked.
         """
+        # convert index_force to boolean
+        b_force = False if not index_command or not index_command.force.lower().startswith('y') else True
+
         iterator = self.iter_paths_to_index(
             verbose,
-            Path(arg_dir).expanduser().resolve(),
-            arg_suffix, arg_force)
+            Path(index_command.dir).expanduser().resolve(),
+            index_command.suffix,
+            b_force)
+
         pi = progressIndicator(level="low")
-        ith = 0
-        for ith, path_ in enumerate(iterator, 1):
+        for path_ in iterator:
             self._index(path_)
+            self.conn.commit()
             pi.update()
         pi.final()
-        return ith
+
+        return pi.get_count()
 
 
     def iter_paths_to_index(self, verbose: bool, path_dir: Path, arg_suffix: str, arg_force: bool) -> Iterable:
@@ -156,7 +162,11 @@ class Index:
 
     def get_text_from_pdf(self, path_, suffix="pdf"):
         """Get text from a pdf file"""
-        return extract_text(path_), None
+        try:
+            return extract_text(path_), None
+        except PDFSyntaxError as err:
+            print(f"\nSorry, {path_} may not be a valid PDF?")
+            return None
 
 
 ################################################################################

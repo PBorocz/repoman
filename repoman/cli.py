@@ -15,11 +15,14 @@ from rich.text import Text
 import db
 from sqlite3 import Connection
 
+from cli_state import get_state, save_state
 from index import Index
-from utils import get_user_history_path
+from utils import get_user_history_path, AnonymousObj
+
 
 INTRODUCTION = "Welcome to RepoMan! ctrl-D, '.exit/.q' to exit, .help for help."
 PROMPT = 'repoman> '
+
 
 # Primary CLI/UI for repoman
 @click.command()
@@ -96,27 +99,11 @@ def query(console: Console, con: Connection, query_string: str) -> None:
 ################################################################################
 # Management commands 
 ################################################################################
-def command_createdb(console: Console, con: Connection, verbose: bool) -> None:
-    """Create the schema in an existing database (requires confirmation)"""
-    db.create(con)
-    console.print(f"Database [bold]created[/bold].")
-
-    
-def command_dropdb(console: Console, con: Connection, verbose: bool) -> None:
-    """Delete the database (requires confirmation)"""
-    db.drop(con)
-    console.print(f"Database [bold]dropped[/bold].")
-
-    
-def command_cleardb(console: Console, con: Connection, verbose: bool) -> None:
-    """Clean out the database of all data (requires confirmation)"""
-    db.clear(con)
-    console.print(f"Database [bold]cleared[/bold].")
-
-    
 def command_status(console: Console, con: Connection, verbose: bool) -> None:
     """Display the status of the database"""
     status = db.status(con)
+    if not status:
+        return
     
     if not status.total_docs:
         console.print("[bold italic]No[/bold italic] documents have been indexed yet, database is empty.")
@@ -148,33 +135,56 @@ def command_index(console: Console, con: Connection, verbose: bool) -> bool:
     """Index a set of files (by root directory and/or suffix)"""
     indexer = Index(con)
 
-    dir = prompt(f'Root directory? > ', default="~/Repository")
-    if not Path(dir).expanduser().exists():
+    index_command = get_state("index")
+    
+    index_command.dir = prompt(f'Directory? > ', default=index_command.dir)
+    if not Path(index_command.dir).expanduser().exists():
         print(f"Sorry, {dir} does not exist")
         return False
         
-    suffix = prompt(f'Suffix? > ', default="txt")
-    
-    s_force = prompt(f'Force? > ', default="False")
-    if s_force:
-        b_force = False if s_force.lower().startswith('fa') else True
-    else:
-        b_force = default
+    index_command.suffix = prompt(f'Suffix?    > ', default=index_command.suffix)
+    index_command.force  = prompt(f'Force?     > ', default=index_command.force)
 
-    num_indexed = indexer.index(True, dir, suffix, b_force)
+    save_state("index", index_command)
+
+    num_indexed = indexer.index(True, index_command)
     if num_indexed:
         console.print(f"Successfully indexed [bold]{num_indexed:,d}[/bold] file(s).")
     else:
         console.print("[bold]No[/bold] files indexed.")
-    return True
         
-def command_help(console: Console, con: Connection, verbose: bool):
-    """Display the list of all commands available"""
+    return True
 
-    command_funcs = [obj for name,obj in inspect.getmembers(sys.modules[__name__]) 
-                     if (inspect.isfunction(obj) and 
-                         name.startswith('command_') and
-                         obj.__module__ == __name__)]
+
+def command_createdb(console: Console, con: Connection, verbose: bool) -> None:
+    """Create the schema in an existing database (requires confirmation)"""
+    db.create(con)
+    console.print(f"Database [bold]created[/bold].")
+
+    
+def command_dropdb(console: Console, con: Connection, verbose: bool) -> None:
+    """Delete the database (requires confirmation)"""
+    db.drop(con)
+    console.print(f"Database [bold]dropped[/bold].")
+
+    
+def command_cleardb(console: Console, con: Connection, verbose: bool) -> None:
+    """Clean out the database of all data (requires confirmation)"""
+    db.clear(con)
+    console.print(f"Database [bold]cleared[/bold].")
+
+    
+def command_help(console: Console, con: Connection, verbose: bool):
+    """Display the list of all commands available by finding all the
+    methods in this module that start with "command_" and using their 
+    doc-strings as the "help" text for their operation.
+    """
+    def check_obj(obj):
+        return inspect.isfunction(obj) and \
+            name.startswith('command_') and \
+            obj.__module__ == __name__
+
+    command_funcs = [obj for name,obj in inspect.getmembers(sys.modules[__name__]) if check_obj(obj)]
 
     commands = [(func.__name__.replace("command_","."), func.__doc__) for func in command_funcs]
     
