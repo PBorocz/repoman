@@ -1,31 +1,22 @@
 # All methods for interfacing with and managing the SQLite database.
-from sqlite3 import Connection, connect, OperationalError
+from sqlite3 import connect, OperationalError
+from sqlite3 import Connection  # Typing only
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
+from pdfminer.pdfparser import PDFSyntaxError
 from rich import print
 
+import constants as c
 from utils import AnonymousObj
 
 
-
-CONFIG_PATH = Path.home() / Path(".config")
-REPOMAN_PATH = CONFIG_PATH / Path("repoman")
-REPOMAN_DB = "repoman.db"
-DB_PATH = REPOMAN_PATH / Path(REPOMAN_DB)
-
-
-def _confirm_db_dir():
-    if not CONFIG_PATH.exists():
-        raise RuntimeError("Sorry, we expect a general '~/.config' directory!")
-    if not REPOMAN_PATH.exists():
-        REPOMAN_PATH.mkdir()
-
-
 def get_db_conn():
-    return connect(DB_PATH)
+    return connect(c.DB_PATH)
 
-
+################################################################################
+# Core database operations
+################################################################################
 def query(con: Connection, query_string: str):
 
     # The snippet() function is similar to highlight(), except that instead of returning entire
@@ -52,10 +43,10 @@ def query(con: Connection, query_string: str):
                    FROM document
                   WHERE document MATCH ?
                ORDER BY rank"""
-        con.execute(sql, (query_string,))
+        rows = con.execute(sql, (query_string,))
 
         docs = list()
-        for idx, row in enumerate(con.fetchall()):
+        for idx, row in enumerate(rows):
             doc_id, snippet, s_path, suffix, last_mod, rank = row
             path = Path(s_path)
             docs.append(AnonymousObj(
@@ -111,16 +102,24 @@ def query(con: Connection, query_string: str):
 def upsert_doc(con: Connection, doc: AnonymousObj) -> int:
 
     def check_delete_existing(con: Connection, path_: Path) -> bool:
-        """Does a row exist already for this path? If so, nuke it."""
+        """Does a row exist already for this path?
+        - If so, nuke it and return True
+        - If not, do nothing and return False.
+        """
         sql = "SELECT rowid FROM document WHERE path = ?"
         row = con.execute(sql, (str(path_),)).fetchone()
         if not row:
             return False
+
         doc_id = row[0]
         sql = "DELETE FROM document WHERE rowid = ?"
         con.execute(sql, (doc_id,))
 
         sql = "DELETE FROM document_tag WHERE doc_id = ?"
+        con.execute(sql, (doc_id,))
+        return True
+
+        sql = "DELETE FROM document_link WHERE doc_id = ?"
         con.execute(sql, (doc_id,))
         return True
 
@@ -135,7 +134,7 @@ def upsert_doc(con: Connection, doc: AnonymousObj) -> int:
     sql = "INSERT INTO document(path, suffix, last_mod, body) VALUES (?, ?, ?, ?)"
     try:
         csr.execute(sql, (str(doc.path_), doc.suffix, doc.lmod, cleansed))
-    except sqlite3.OperationalError as err:
+    except OperationalError as err:
         print(err)
         breakpoint()
     doc_id = csr.lastrowid
@@ -143,31 +142,45 @@ def upsert_doc(con: Connection, doc: AnonymousObj) -> int:
     # Do we have any tags to handle?
     if doc.tags:
         for tag in doc.tags:
-            # Essentially and upsert on the "tag" value itself.
-            query = "SELECT tag FROM tag WHERE tag = ?"
-            csr = con.cursor()  # Use a cursor here to get access to the lastrowid
-            if not csr.execute(query, (tag,)).fetchone():
-                sql = "INSERT INTO tag(tag) VALUES(?)"
-                con.execute(sql, (tag,))
-                tag_id = csr.lastrowid
-            else:
-                sql = "SELECT rowid FROM tag WHERE tag = ?"
-                tag_id = con.execute(sql, (tag,)).fetchone()[0]
+            tag_id = upsert_tag(con, tag)
 
         # Update that we have this tag assigned to this document (unless it exists already)
-        sql = "SELECT rowid FROM document_tag WHERE tag_id=? AND doc_id=?"
-        if not con.execute(sql, (tag_id, doc_id)).fetchone():
-            sql = "INSERT INTO document_tag(tag_id, doc_id) VALUES(?, ?)"
-            con.execute(sql, (tag_id, doc_id))
+        upsert_document_tag(con, doc_id, tag_id)
 
     # Do we have any links to handle?
     if doc.links:
-        for (url, desc) in doc.links:
-            # Update that we have this link embedded within this document (unless it exists already)
-            sql = "SELECT rowid FROM document_link WHERE url=? AND doc_id=?"
-            if not con.execute(sql, (url, doc_id)).fetchone():
-                sql = "INSERT INTO document_link(doc_id, url, desc) VALUES(?, ?, ?)"
-                con.execute(sql, (doc_id, url, desc))
+        for link in doc.links:
+            upsert_document_link(con, doc_id, link)
+
+
+def upsert_tag(con: Connection, tag: str) -> int:
+    """Upsert on the specified tag, return the tag_id associated with it."""
+    # Essentially and upsert on the "tag" value itself.
+    query = "SELECT tag FROM tag WHERE tag = ?"
+    csr = con.cursor()  # Use a cursor here to get access to the lastrowid
+    if not csr.execute(query, (tag,)).fetchone():
+        sql = "INSERT INTO tag(tag) VALUES(?)"
+        con.execute(sql, (tag,))
+        return csr.lastrowid
+    sql = "SELECT rowid FROM tag WHERE tag = ?"
+    return con.execute(sql, (tag,)).fetchone()[0]
+
+
+def upsert_document_tag(con: Connection, doc_id: int, tag_id:int) -> None:
+    """Upsert on the document<->tag relationship"""
+    sql = "SELECT rowid FROM document_tag WHERE tag_id=? AND doc_id=?"
+    if not con.execute(sql, (tag_id, doc_id)).fetchone():
+        sql = "INSERT INTO document_tag(tag_id, doc_id) VALUES(?, ?)"
+        con.execute(sql, (tag_id, doc_id))
+
+
+def upsert_document_link(con: Connection, doc_id: int, link: Tuple[str]) -> None:
+    """Upsert on the document->link relationship."""
+    sql = "SELECT rowid FROM document_link WHERE url=? AND doc_id=?"
+    (url, desc) = link
+    if not con.execute(sql, (url, doc_id)).fetchone():
+        sql = "INSERT INTO document_link(doc_id, url, desc) VALUES(?, ?, ?)"
+        con.execute(sql, (doc_id, url, desc))
 
 
 def get_paths_already_indexed(con: Connection) -> Dict[Path, str]:
@@ -177,14 +190,18 @@ def get_paths_already_indexed(con: Connection) -> Dict[Path, str]:
 
 
 ################################################################################
-# Database status and maintenance
+# Database Status
 ################################################################################
 def status(con: Connection):
     return_ = AnonymousObj()
 
     # Documents...
-    query = "SELECT count(*) FROM document"
-    return_.total_docs = con.execute(query).fetchone()[0]
+    try:
+        query = "SELECT count(*) FROM document"
+        return_.total_docs = con.execute(query).fetchone()[0]
+    except OperationalError:
+        print("Sorry, database hasn't been created yet. Please use .createdb to create a new database.")
+        return None
 
     query = """SELECT suffix, count(*)
                  FROM document
@@ -210,6 +227,9 @@ def status(con: Connection):
     return return_
 
 
+################################################################################
+# Database Maintenance
+################################################################################
 def clear(con: Connection):
     csr = con.cursor()
     for table_ in ('document_link', 'document_tag', 'document', 'tag'):
@@ -223,9 +243,8 @@ def drop(con: Connection):
 
 def create(con: Connection):
     """Create our database (in the user general config area)"""
-    _confirm_db_dir()
     schema = ("""
-    CREATE VIRTUAL TABLE document USING fts5(
+    CREATE VIRTUAL TABLE IF NOT EXISTS document USING fts5(
 	path,                 -- eg. ~/Repository/1.Projects/lapswim_timemap
 	suffix   UNINDEXED,   -- eg. "org", or pdf, txt, py etc.
         last_mod UNINDEXED,   -- eg. 2021-11-29 or 2021-11-29T0929
