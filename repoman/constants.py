@@ -1,7 +1,21 @@
 # Constants
 from pathlib import Path
 
-CONFIG_PATH  = Path.home() / Path(".config")
-REPOMAN_PATH = CONFIG_PATH / Path("repoman")
-REPOMAN_DB   = "repoman.db"
-DB_FILE      = str(REPOMAN_PATH / Path(REPOMAN_DB))
+REPOMAN_DB = "repoman.db"
+STATE_ROOT = ".cli_state"
+
+REPOMAN_PATH = Path("~/.config").expanduser() / Path("repoman")
+if not REPOMAN_PATH.exists():
+    REPOMAN_PATH.mkdir(parents=True)
+
+DB_PATH = REPOMAN_PATH / Path(REPOMAN_DB)
+
+# State management of cli command history.
+DEFAULTS = {
+    "index" : {
+        "dir"    : str(Path.home()),
+        "suffix" : "txt",
+        "force"  : "No",
+    },
+
+}
