@@ -53,8 +53,12 @@ class progressIndicator:
             tps = spt
             if spt:
                 tps = 1 / spt
-                if tps > spt: print(" (%7d @ %-8.2f tps)" % (self.__count,tps))
-                else:         print(" (%7d @ %-8.2f spt)" % (self.__count,spt))
+                # Print either seconds per txn or txns per second depending
+                # on whichever is larger..
+                if tps > spt:
+                    print(" (%7d @ %-8.2f tps)" % (self.__count, tps))
+                else:
+                    print(" (%7d @ %-8.2f spt)" % (self.__count, spt))
             else:
                 print(" (%7d @ %8s spt)" % (self.__count, '-----.--'))
 
@@ -75,7 +79,7 @@ class progressIndicator:
         self.__count = self.__count + 1
         sys.stdout.flush()
 
-    def getCount(self):
+    def get_count(self):
         return self.__count
 
     def final(self):
