@@ -4,6 +4,7 @@ import multiprocessing
 import os
 import re
 import sys
+import time
 from collections import defaultdict
 from copy import copy
 from pathlib import Path
@@ -30,6 +31,7 @@ SKIP_DIRS = (
     ".vm",
     "__pycache__",
     "node_modules",
+    "zzArchive",
 )
 
 INCLUDE_EXTENSIONS = (
@@ -50,27 +52,37 @@ YYYY_MM_DD_PATTERN     = re.compile(r'^(\d{4,4})-([01]\d)-([0123]\d)[- _T]')
 ################################################################################
 # CORE METHOD: Get an iterator of files to be indexed and return the number that worked.
 ################################################################################
-def index(verbose: bool, index_command: AnonymousObj) -> int:
+def index(verbose: bool, index_command: AnonymousObj) -> Tuple[int, float]:
 
     b_force = False if not index_command.force or not index_command.force.lower().startswith('y') else True
-    iterator = iter_paths_to_index(
+
+    paths_to_index = _paths_to_index(
         verbose,
-        get_db_conn(),
         Path(index_command.root).expanduser().resolve(),
         index_command.suffix,
         b_force)
 
-    with timer("Time to index files"):
-        pool_size = multiprocessing.cpu_count() * 2
-        pool = multiprocessing.Pool(processes=pool_size)
-        pool_outputs = pool.map(_index, iterator)
-        pool.close()
-        pool.join()
+    # Set up our processing pool based on the number of documents to index.
+    pool_size = multiprocessing.cpu_count() * 2 if len(paths_to_index) > 100 else 1
+    pool = multiprocessing.Pool(processes=pool_size)
 
-    return len(pool_outputs)
+    # Go!
+    start = time.time()
+    pool_outputs = pool.map(_index, paths_to_index)
+
+    # Wait for all to finish..
+    pool.close()
+    pool.join()
+    end = time.time()
+
+    return len(pool_outputs), time.time() - start
 
 
-def iter_paths_to_index(verbose: bool, conn: Connection, path_dir: Path, arg_suffix: str, arg_force: bool) -> Iterable:
+def _paths_to_index(
+        verbose: bool,
+        path_dir: Path,
+        arg_suffix: Optional[str],
+        arg_force: bool) -> Iterable[Path]:
     """Encapsulate all the logic regarding what files to be indexed,
     taking into account:
     - If we're filtering by suffix (here specified *without* the leading '.', e.g. pdf, org, text ...)
@@ -78,12 +90,15 @@ def iter_paths_to_index(verbose: bool, conn: Connection, path_dir: Path, arg_suf
     - If the file hasn't been modified from the last time we indexed it.
     - Directories to skip outright.
     """
+    return_ = list()
+
     # Before we start, what files have already been index?
-    paths_already_indexed = get_paths_already_indexed(conn)
+    paths_already_indexed = get_paths_already_indexed(get_db_conn())
 
     for path_ in walker(path_dir, arg_suffix, SKIP_DIRS, INCLUDE_EXTENSIONS):
         if arg_force:
-            yield path_  # Easy, index every file that passes our file "filters"!
+            return_.append(path_)  # Easy, index every file that passes our file "filters"!
+            continue
 
         # Have we not indexed this file before?
         is_path_not_indexed = path_ not in paths_already_indexed
@@ -94,16 +109,18 @@ def iter_paths_to_index(verbose: bool, conn: Connection, path_dir: Path, arg_suf
 
         # Decide to take/not take the path under consideration
         if is_path_not_indexed:
-            yield path_  # Easy case, we haven't seen it yet!
+            return_.append(path_)  # Easy case, we haven't seen it yet!
+            continue
         else:
             # We've already seen it...but...
             # has it been updated since we last indexed it?
             if has_doc_been_updated:
-                yield path_
+                return_.append(path_)
+
+    return return_
 
 def _index(path_) -> bool:
     """Index the file on the specified path on a thread-safe basis"""
-    conn = get_db_conn()
     so_doc = AnonymousObj(
         path_  = path_,
         suffix = path_.suffix.lower()[1:],
@@ -125,10 +142,13 @@ def _index(path_) -> bool:
         so_doc.body, so_doc.links = get_text_method(path_)
 
     # Update/insert the doc into our database
-    return_ = upsert_doc(conn, so_doc)
-    conn.commit()
+    # (get a conn here as we might be in a separate thread from the main index method)
+    con = get_db_conn()
+    doc_id = upsert_doc(con, so_doc)
+    con.commit()
 
-    return return_
+    return doc_id
+
 
 def get_text_from_txt(path_, suffix="txt") -> Tuple[str, Optional[list[str]]]:
     """Get text from a txt file"""

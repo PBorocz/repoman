@@ -1,5 +1,8 @@
 # Constants
 from pathlib import Path
+from rich import box
+
+DEFAULT_BOX_STYLE = box.SIMPLE_HEAVY
 
 REPOMAN_DB = "repoman.db"
 STATE_ROOT = ".cli_state"

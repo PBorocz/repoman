@@ -17,6 +17,7 @@ from rich.text import Text
 import db
 from sqlite3 import Connection
 
+import constants as c
 from cli_state import get_state, save_state
 from index import index
 from utils import get_user_history_path, AnonymousObj
@@ -29,8 +30,9 @@ INTRODUCTION = f"""Welcome to RepoMan!
 {italic('Ctrl-D')}, {italic('.exit')} or {italic('.q')} to exit.
 {italic('.help')} for help.
 """
-
 PROMPT = 'repoman> '
+
+# c.DEFAULT_BOX_STYLE = box.SIMPLE_HEAVY
 
 
 # Primary CLI/UI for repoman
@@ -40,7 +42,6 @@ def cli(verbose: bool) -> None:
     
     console = Console()
     console.clear()
-    con = db.get_db_conn()
     
     print(Figlet(font='standard').renderText('Repo-Man'))
     console.print(INTRODUCTION)
@@ -54,51 +55,55 @@ def cli(verbose: bool) -> None:
         except (KeyboardInterrupt, EOFError):
             break
 
-        if response.lower() in (".exit", ".q"):
+        if response.lower() in (".exit", ".q"):  # Done?
             break
 
-        # As Ahnold would say...DOO EET!
-        if response:
-            execute(verbose, con, response)
+        if response:            # As Ahnold would say...DOO EET!
+            execute(verbose, response)
 
             
-def execute(verbose: bool, con: Connection, response: str) -> bool:
+def execute(verbose: bool, response: str) -> bool:
     """Execute the "response" provided, determining whether or not
     it's a "command" or "simply" a query to be executed."""
-    # Look for command before assuming a query...
-
     console = Console()
+    conn = db.get_db_conn()
+    # Look for command before assuming a query...
     if response.startswith('.'):
+        #####################################################
         # It's a *command*...
+        #####################################################
         s_method = response[1:]
         try:
             method = globals()[f"command_{s_method}"]
         except KeyError:
             console.print(f"Sorry, [red bold]{response}[/red bold] is not a known command (.help to list them)")
             return False
-        return method(console, con, verbose)
+        console.clear()
+        return method(console, conn, verbose)
     else:
+        #####################################################
         # Otherwise, we assume "response" represents a query!
-        query(console, con, response)
+        #####################################################
+        query(console, conn, response)
 
         
-def query(console: Console, con: Connection, query_string: str) -> None:
+def query(console: Console, conn: Connection, query_string: str) -> None:
     """Execute a query against the doc store"""
     
     def _display_query_results(console, results: list) -> None:
-        table = Table(show_header=True, header_style="bold")
-        table.add_column("Snippet")
+        table = Table(show_header=True, header_style="bold", box=c.DEFAULT_BOX_STYLE)
         table.add_column("Path")
         table.add_column("LastMod")
+        table.add_column("Snippet")
         for row in results:
             table.add_row(
-                row.snippet,
                 row.path,
                 row.last_mod.split(' ')[0],  # Don't need time..
+                row.snippet,
             )
         console.print(table)
     
-    results = db.query(con, query_string)
+    results = db.query(conn, query_string)
     if results:
         console.clear()
         _display_query_results(console, results)
@@ -108,9 +113,9 @@ def query(console: Console, con: Connection, query_string: str) -> None:
 ################################################################################
 # Management commands 
 ################################################################################
-def command_status(console: Console, con: Connection, verbose: bool) -> None:
+def command_status(console: Console, conn: Connection, verbose: bool) -> None:
     """Display the overall status of the database"""
-    status = db.status(con)
+    status = db.status(conn)
     if not status:
         return
     
@@ -119,7 +124,7 @@ def command_status(console: Console, con: Connection, verbose: bool) -> None:
         return
 
     # Documents...
-    table = Table(show_header=True, show_footer=True, box=box.SIMPLE_HEAVY)
+    table = Table(show_header=True, show_footer=True, box=c.DEFAULT_BOX_STYLE)
     table.add_column("Suffix", footer=Text("Total"))
     table.add_column("Documents", footer=Text(f"{status.total_docs:,d}"), justify="right")
     for (suffix, count) in status.suffix_counts:
@@ -134,9 +139,9 @@ def command_status(console: Console, con: Connection, verbose: bool) -> None:
         console.print(f"Total links : [bold]{status.total_links:,d}[/bold]")
 
         
-def command_tags(console: Console, con: Connection, verbose: bool) -> None:
+def command_tags(console: Console, conn: Connection, verbose: bool) -> None:
     """Display a summary of tags encountered."""
-    tag_counts = db.tag_count(con)
+    tag_counts = db.tag_count(conn)
     if not tag_counts:
         console.print("[bold italic]No[/bold italic] tags have been encountered yet.")
     else:
@@ -148,17 +153,17 @@ def command_tags(console: Console, con: Connection, verbose: bool) -> None:
         console.print(table)
 
         
-def command_index(console: Console, con: Connection, verbose: bool) -> bool:
+def command_index(console: Console, conn: Connection, verbose: bool) -> bool:
     """Index a set of files (by root directory and/or suffix)"""
 
     def sub_prompt(prompt_: str, default_: str) -> str:
-        return prompt(f"{prompt_:10s} > ", default=default_)
+        return prompt(f"{prompt_:11s} : ", default=default_)
 
     # Get the values we last used for this command..
     index_command = get_state("index")
 
     ############################################################
-    # Now, using these as defaults, get any new values:
+    # Using these as defaults, prompt for any updated values
     ############################################################
     # Root directory to index from..
     index_command.root = sub_prompt('Root',index_command.root)
@@ -170,8 +175,7 @@ def command_index(console: Console, con: Connection, verbose: bool) -> bool:
     index_command.suffix = sub_prompt('Suffix', index_command.suffix)
 
     # Should we overwrite existing entries?
-    s_force  = sub_prompt('Force', index_command.force)
-    index_command.force = False if not s_force or not s_force.lower().startswith('y') else True
+    index_command.force  = sub_prompt('Force [y/n]', index_command.force)
 
     # Save away these values for the next time we run this command.
     save_state("index", index_command)
@@ -179,9 +183,16 @@ def command_index(console: Console, con: Connection, verbose: bool) -> bool:
     ############################################################
     # DO IT!
     ############################################################
-    num_indexed = index(True, index_command)
+    num_indexed, time_taken = index(True, index_command)
     if num_indexed:
-        console.print(f"Successfully indexed [bold]{num_indexed:,d}[/bold] file(s).")
+        docs_per_sec = num_indexed / time_taken
+        table = Table(show_header=False, box=c.DEFAULT_BOX_STYLE)
+        table.add_column("-")
+        table.add_column("-", justify="right")
+        table.add_row(f"Total Documents"  , f"[bold]{num_indexed:,d}[/bold]")
+        table.add_row(f"Total Time (sec)" , f"[bold]{time_taken:.4f}[/bold]")
+        table.add_row(f"Documents per sec", f"[bold]{docs_per_sec:.4f}[/bold]")
+        console.print(table)
     else:
         console.print("[bold]No[/bold] files indexed.")
         
@@ -226,7 +237,9 @@ def command_help(console: Console, con: Connection, verbose: bool):
 
     console.print("- All entries that don't start with '.' are consider queries.")
     console.print("- Entries start with '.' are RepoMan commands:")
-    table = Table(show_header=False)
+    table = Table(box=c.DEFAULT_BOX_STYLE)
+    table.add_column("Command")
+    table.add_column("Description")
     for command in sorted(commands):
         table.add_row(*command)
     console.print(table)

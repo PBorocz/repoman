@@ -9,7 +9,7 @@ from pdfminer.pdfparser import PDFSyntaxError
 from rich import print
 
 import constants as c
-from utils import AnonymousObj
+from utils import AnonymousObj, retry
 
 
 def get_db_conn():
@@ -36,7 +36,7 @@ def query(con: Connection, query_string: str):
 
     def get_docs_from_fts(con: Connection, query_string:str) -> List[AnonymousObj]:
         sql = """SELECT rowid,
-                        snippet(document, 3, '[green bold]', '/[green bold]', '...', 5),
+                        snippet(document, 3, '[green bold]', '[/green bold]', '...', 5),
                         path,
                         suffix,
                         last_mod,
@@ -102,28 +102,6 @@ def query(con: Connection, query_string: str):
 
 def upsert_doc(con: Connection, doc: AnonymousObj) -> int:
 
-    def check_delete_existing(con: Connection, path_: Path) -> bool:
-        """Does a row exist already for this path?
-        - If so, nuke it and return True
-        - If not, do nothing and return False.
-        """
-        sql = "SELECT rowid FROM document WHERE path = ?"
-        row = con.execute(sql, (str(path_),)).fetchone()
-        if not row:
-            return False
-
-        doc_id = row[0]
-        sql = "DELETE FROM document WHERE rowid = ?"
-        con.execute(sql, (doc_id,))
-
-        sql = "DELETE FROM document_tag WHERE doc_id = ?"
-        con.execute(sql, (doc_id,))
-        return True
-
-        sql = "DELETE FROM document_link WHERE doc_id = ?"
-        con.execute(sql, (doc_id,))
-        return True
-
     # Clean out any existing row!
     check_delete_existing(con, doc.path_)
 
@@ -183,6 +161,30 @@ def upsert_document_link(con: Connection, doc_id: int, link: Tuple[str]) -> None
     if not con.execute(sql, (url, doc_id)).fetchone():
         sql = "INSERT INTO document_link(doc_id, url, desc) VALUES(?, ?, ?)"
         con.execute(sql, (doc_id, url, desc))
+
+
+@retry(OperationalError, tries=5, delay=1.0)
+def check_delete_existing(con: Connection, path_: Path) -> bool:
+    """Does a row exist already for this path?
+    - If so, nuke it and return True
+    - If not, do nothing and return False.
+    """
+    sql = "SELECT rowid FROM document WHERE path = ?"
+    row = con.execute(sql, (str(path_),)).fetchone()
+    if not row:
+        return False
+
+    doc_id = row[0]
+    sql = "DELETE FROM document WHERE rowid = ?"
+    con.execute(sql, (doc_id,))
+
+    sql = "DELETE FROM document_tag WHERE doc_id = ?"
+    con.execute(sql, (doc_id,))
+    return True
+
+    sql = "DELETE FROM document_link WHERE doc_id = ?"
+    con.execute(sql, (doc_id,))
+    return True
 
 
 def get_paths_already_indexed(con: Connection) -> Dict[Path, str]:
