@@ -100,7 +100,7 @@ def query(console: Console, con: Connection, query_string: str) -> None:
 # Management commands 
 ################################################################################
 def command_status(console: Console, con: Connection, verbose: bool) -> None:
-    """Display the status of the database"""
+    """Display the overall status of the database"""
     status = db.status(con)
     if not status:
         return
@@ -116,19 +116,26 @@ def command_status(console: Console, con: Connection, verbose: bool) -> None:
     for (suffix, count) in status.suffix_counts:
         table.add_row(suffix, f"{count:,d}")
     console.print(table)
-
-    # Tags...
-    if status.total_docs:
-        table = Table(show_header=True, show_footer=True, box=box.SIMPLE_HEAVY)
-        table.add_column("Tag", footer=Text("Total"))
-        table.add_column("Documents", footer=Text(f"{status.total_tags:,d}"), justify="right")
-        for (suffix, count) in status.tag_counts:
-            table.add_row(suffix, f"{count:,d}")
-        console.print(table)
+    
+    if status.total_tags:
+        console.print(f"Total tags  : [bold]{status.total_tags:,d}[/bold]")
 
     # Links...
     if status.total_links:
-        console.print(f"Total links extracted from org files: [bold]{status.total_links:,d}[/bold]")
+        console.print(f"Total links : [bold]{status.total_links:,d}[/bold]")
+
+        
+def command_tags(console: Console, con: Connection, verbose: bool) -> None:
+    """Display a summary of tags encountered."""
+    tag_counts = db.tag_count(con)
+    if not tag_counts:
+        console.print("[bold italic]No[/bold italic] tags have been encountered yet.")
+    else:
+        table = Table(show_header=True, show_footer=True, box=box.SIMPLE_HEAVY)
+        table.add_column("Tag", footer=Text("Total"))
+        for (suffix, count) in tag_counts:
+            table.add_row(suffix, f"{count:,d}")
+        console.print(table)
 
         
 def command_index(console: Console, con: Connection, verbose: bool) -> bool:
@@ -194,12 +201,15 @@ def command_help(console: Console, con: Connection, verbose: bool):
     methods in this module that start with "command_" and using their 
     doc-strings as the "help" text for their operation.
     """
-    def check_obj(obj):
+    def check_obj(obj, name):
         return inspect.isfunction(obj) and \
             name.startswith('command_') and \
             obj.__module__ == __name__
 
-    command_funcs = [obj for name,obj in inspect.getmembers(sys.modules[__name__]) if check_obj(obj)]
+    command_funcs = [
+        obj for name,obj in inspect.getmembers(sys.modules[__name__]) \
+        if check_obj(obj, name)
+    ]
 
     commands = [(func.__name__.replace("command_","."), func.__doc__) for func in command_funcs]
     

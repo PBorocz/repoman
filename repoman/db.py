@@ -194,7 +194,7 @@ def get_paths_already_indexed(con: Connection) -> Dict[Path, str]:
 ################################################################################
 # Database Status
 ################################################################################
-def status(con: Connection):
+def status(con: Connection) -> AnonymousObj:
     return_ = AnonymousObj()
 
     # Documents...
@@ -215,18 +215,21 @@ def status(con: Connection):
     query = "SELECT count(*) FROM tag"
     return_.total_tags = con.execute(query).fetchone()[0]
 
-    query = """SELECT tag, count(*)
-                 FROM document_tag
-           INNER JOIN tag on tag.rowid = document_tag.tag_id
-             GROUP BY tag_id
-             ORDER BY count(*) DESC"""
-    return_.tag_counts = con.execute(query).fetchall()
-
     # Links...
     query = "SELECT count(*) FROM document_link"
     return_.total_links = con.execute(query).fetchone()[0]
 
     return return_
+
+def tag_count(con: Connection):
+    """Count of documents per tag, order by count desc"""
+
+    query = """SELECT tag, count(*)
+                 FROM document_tag
+           INNER JOIN tag on tag.rowid = document_tag.tag_id
+             GROUP BY tag_id
+             ORDER BY count(*) DESC"""
+    return con.execute(query).fetchall()
 
 
 ################################################################################
