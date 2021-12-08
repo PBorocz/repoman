@@ -56,7 +56,7 @@ def index(verbose: bool, index_command: AnonymousObj) -> int:
     iterator = iter_paths_to_index(
         verbose,
         get_db_conn(),
-        Path(index_command.dir).expanduser().resolve(),
+        Path(index_command.root).expanduser().resolve(),
         index_command.suffix,
         b_force)
 
@@ -175,6 +175,7 @@ def get_text_from_pdf(path_, suffix="pdf") -> Tuple[str, Optional[list[str]]]:
 # Utility methods
 ################################################################################
 def get_file_encoding(path_: Path) -> str:
+    """Detect the most appropriate character encoding to use to open the file"""
     with open(path_, 'rb') as fh_:
         rawdata = fh_.read()
         result = chardet.detect(rawdata)

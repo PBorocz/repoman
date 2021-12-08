@@ -141,7 +141,8 @@ def command_tags(console: Console, con: Connection, verbose: bool) -> None:
         console.print("[bold italic]No[/bold italic] tags have been encountered yet.")
     else:
         table = Table(show_header=True, show_footer=True, box=box.SIMPLE_HEAVY)
-        table.add_column("Tag", footer=Text("Total"))
+        table.add_column("Tag")
+        table.add_column("Documents")
         for (suffix, count) in tag_counts:
             table.add_row(suffix, f"{count:,d}")
         console.print(table)
@@ -151,7 +152,7 @@ def command_index(console: Console, con: Connection, verbose: bool) -> bool:
     """Index a set of files (by root directory and/or suffix)"""
 
     def sub_prompt(prompt_: str, default_: str) -> str:
-        return prompt(f"{prompt_:10s}? > ", default=default_)
+        return prompt(f"{prompt_:10s} > ", default=default_)
 
     # Get the values we last used for this command..
     index_command = get_state("index")
@@ -160,10 +161,10 @@ def command_index(console: Console, con: Connection, verbose: bool) -> bool:
     # Now, using these as defaults, get any new values:
     ############################################################
     # Root directory to index from..
-    index_command.dir = sub_prompt('Directory',index_command.dir)
-    if not Path(index_command.dir).expanduser().exists():
-        print(f"Sorry, {dir} does not exist")
-        return False
+    index_command.root = sub_prompt('Root',index_command.root)
+    if not Path(index_command.root).expanduser().exists():
+        print(f"Sorry, {index_command.root} does not exist")
+        return False  # Don't pass go and definitely, don't update state!
     
     # What file suffix to index (if any)
     index_command.suffix = sub_prompt('Suffix', index_command.suffix)
