@@ -6,10 +6,12 @@ import sys
 from collections import defaultdict
 from copy import copy
 from pathlib import Path
-from typing import Tuple, Iterable, List, Set, Dict
+from typing import Tuple, Iterable, List, Set, Dict, Optional
 
 import sqlite3
 from pdfminer.high_level import extract_text
+from pdfminer.pdftypes import PDFException
+
 from rich import print
 from rich.progress import track
 
@@ -128,13 +130,13 @@ class Index:
         return upsert_doc(self.conn, so_doc)
 
 
-    def get_text_from_txt(self, path_, suffix="txt"):
+    def get_text_from_txt(self, path_, suffix="txt") -> str, Optional[list[str]]:
         """Get text from a txt file"""
         with open(path_, encoding=get_file_encoding(path_)) as fh_:
             return fh_.read(), None
 
 
-    def get_text_from_org(self, path_, suffix="org"):
+    def get_text_from_org(self, path_, suffix="org") -> str, Optional[list[str]]:
         """Get text and links from an org file"""
         text  = []
         links = []
@@ -160,12 +162,12 @@ class Index:
         return ' '.join(text), links
 
 
-    def get_text_from_pdf(self, path_, suffix="pdf"):
+    def get_text_from_pdf(self, path_, suffix="pdf") -> str, Optional[list[str]]:
         """Get text from a pdf file"""
         try:
             return extract_text(path_), None
-        except PDFSyntaxError as err:
-            print(f"\nSorry, {path_} may not be a valid PDF?")
+        except PDFException as err:
+            print(f"\nSorry, {path_} may be a invalid PDF")
             return None
 
 
