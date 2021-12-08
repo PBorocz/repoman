@@ -1,7 +1,9 @@
 #!/usr/bin/env py
+import re
 import sys
 import inspect
 from pathlib import Path
+from textwrap import dedent
 
 import click
 from prompt_toolkit import PromptSession, prompt
@@ -20,7 +22,14 @@ from index import index
 from utils import get_user_history_path, AnonymousObj
 
 
-INTRODUCTION = "Welcome to RepoMan! ctrl-D, '.exit/.q' to exit, .help for help."
+def italic(str_):
+    return f"[italic]{str_}[/italic]"
+
+INTRODUCTION = f"""Welcome to RepoMan!
+{italic('Ctrl-D')}, {italic('.exit')} or {italic('.q')} to exit.
+{italic('.help')} for help.
+"""
+
 PROMPT = 'repoman> '
 
 
@@ -34,7 +43,7 @@ def cli(verbose: bool) -> None:
     con = db.get_db_conn()
     
     print(Figlet(font='standard').renderText('Repo-Man'))
-    print(INTRODUCTION)
+    console.print(INTRODUCTION)
 
     # Create prompt session to allow commands over sessions.
     session = PromptSession(history=FileHistory(get_user_history_path()))
@@ -197,25 +206,26 @@ def command_cleardb(console: Console, con: Connection, verbose: bool) -> None:
 
     
 def command_help(console: Console, con: Connection, verbose: bool):
-    """Display the list of all commands available by finding all the
-    methods in this module that start with "command_" and using their 
-    doc-strings as the "help" text for their operation.
-    """
-    def check_obj(obj, name):
-        return inspect.isfunction(obj) and \
-            name.startswith('command_') and \
-            obj.__module__ == __name__
+    """Display the list of all RepoMan commands available."""
+    # Display the list of all commands available by finding all the methods in this module that start with "command_" and using their doc-strings as the "help" text for their operation.
+    def check_func(name, func):
+        """Confirm that the function sent in represents a RepoMan command"""
+        return inspect.isfunction(func) and name.startswith('command_') and func.__module__ == __name__
 
-    command_funcs = [
-        obj for name,obj in inspect.getmembers(sys.modules[__name__]) \
-        if check_obj(obj, name)
-    ]
-
-    commands = [(func.__name__.replace("command_","."), func.__doc__) for func in command_funcs]
+    commands = []
+    for name, func in inspect.getmembers(sys.modules[__name__]):
+        if not check_func(name, func):
+            continue
+        name = func.__name__.replace("command_",".")
+        docs = dedent(func.__doc__)
+        docs = docs.replace("\n", "")
+        docs = re.sub('\s+',' ', docs)
+        commands.append((name, docs))
     
+
+    console.print("- All entries that don't start with '.' are consider queries.")
+    console.print("- Entries start with '.' are RepoMan commands:")
     table = Table(show_header=False)
-    table.add_column("Command")
-    table.add_column("Explanation")
     for command in sorted(commands):
         table.add_row(*command)
     console.print(table)
