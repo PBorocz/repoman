@@ -8,12 +8,7 @@ from utils import AnonymousObj
 
 def get_state(command: str) -> AnonymousObj:
     path_ = get_state_path(command)
-    state = c.DEFAULTS[command]  # Default if file doesn't exist or is corrupt.
-    if path_.exists():
-        try:
-            state = nt.load(path_, top='dict')
-        except nt.NestedTextError as e:
-            ...
+    state = nt.load(path_, top='dict') if path_.exists() else c.DEFAULTS[command]
     return AnonymousObj(**state)
 
 

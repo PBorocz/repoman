@@ -16,7 +16,7 @@ import db
 from sqlite3 import Connection
 
 from cli_state import get_state, save_state
-from index import Index
+from index import index
 from utils import get_user_history_path, AnonymousObj
 
 
@@ -133,21 +133,36 @@ def command_status(console: Console, con: Connection, verbose: bool) -> None:
         
 def command_index(console: Console, con: Connection, verbose: bool) -> bool:
     """Index a set of files (by root directory and/or suffix)"""
-    indexer = Index(con)
 
+    def sub_prompt(prompt_: str, default_: str) -> str:
+        return prompt(f"{prompt_:10s}? > ", default=default_)
+
+    # Get the values we last used for this command..
     index_command = get_state("index")
-    
-    index_command.dir = prompt(f'Directory? > ', default=index_command.dir)
+
+    ############################################################
+    # Now, using these as defaults, get any new values:
+    ############################################################
+    # Root directory to index from..
+    index_command.dir = sub_prompt('Directory',index_command.dir)
     if not Path(index_command.dir).expanduser().exists():
         print(f"Sorry, {dir} does not exist")
         return False
-        
-    index_command.suffix = prompt(f'Suffix?    > ', default=index_command.suffix)
-    index_command.force  = prompt(f'Force?     > ', default=index_command.force)
+    
+    # What file suffix to index (if any)
+    index_command.suffix = sub_prompt('Suffix', index_command.suffix)
 
+    # Should we overwrite existing entries?
+    s_force  = sub_prompt('Force', index_command.force)
+    index_command.force = False if not s_force or not s_force.lower().startswith('y') else True
+
+    # Save away these values for the next time we run this command.
     save_state("index", index_command)
 
-    num_indexed = indexer.index(True, index_command)
+    ############################################################
+    # DO IT!
+    ############################################################
+    num_indexed = index(True, index_command)
     if num_indexed:
         console.print(f"Successfully indexed [bold]{num_indexed:,d}[/bold] file(s).")
     else:

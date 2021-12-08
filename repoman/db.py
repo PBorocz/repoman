@@ -1,4 +1,5 @@
 # All methods for interfacing with and managing the SQLite database.
+import sys
 from sqlite3 import connect, OperationalError
 from sqlite3 import Connection  # Typing only
 from pathlib import Path
@@ -130,13 +131,13 @@ def upsert_doc(con: Connection, doc: AnonymousObj) -> int:
     cleansed = doc.body.replace("'", '"')
 
     # Do the insert..(note that body could be essentially empty, ie. '')
-    csr = con.cursor()  # Use a cursor here to get access to the lastrowid
+    csr = con.cursor()  # Use a cursor here to get access to the lastrowid aka doc_id
     sql = "INSERT INTO document(path, suffix, last_mod, body) VALUES (?, ?, ?, ?)"
     try:
         csr.execute(sql, (str(doc.path_), doc.suffix, doc.lmod, cleansed))
     except OperationalError as err:
-        print(err)
-        breakpoint()
+        sys.stderr.write(f"{err}\n")
+        return None
     doc_id = csr.lastrowid
 
     # Do we have any tags to handle?
@@ -152,6 +153,7 @@ def upsert_doc(con: Connection, doc: AnonymousObj) -> int:
         for link in doc.links:
             upsert_document_link(con, doc_id, link)
 
+    return doc_id
 
 def upsert_tag(con: Connection, tag: str) -> int:
     """Upsert on the specified tag, return the tag_id associated with it."""
@@ -231,10 +233,9 @@ def status(con: Connection):
 # Database Maintenance
 ################################################################################
 def clear(con: Connection):
-    csr = con.cursor()
     for table_ in ('document_link', 'document_tag', 'document', 'tag'):
         con.execute(f"DELETE FROM {table_}")
-
+    con.commit()
 
 def drop(con: Connection):
     if DB_PATH.exists():
