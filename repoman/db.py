@@ -106,7 +106,9 @@ def upsert_doc(con: Connection, doc: AnonymousObj) -> int:
     check_delete_existing(con, doc.path_)
 
     # Do any final cleansing of the text to make sure it's "insertable"!
-    cleansed = doc.body.replace("'", '"')
+    # If we didn't get any text, we still want to make an entry so we know
+    # that we've considered the path already.
+    cleansed = doc.body.replace("'", '"') if doc.body else ''
 
     # Do the insert..(note that body could be essentially empty, ie. '')
     csr = con.cursor()  # Use a cursor here to get access to the lastrowid aka doc_id
