@@ -186,9 +186,9 @@ def get_text_from_pdf(path_, suffix="pdf") -> Tuple[str, Optional[list[str]]]:
     """Get text from a pdf file"""
     try:
         return extract_text(path_), None
-    except PDFException as err:
+    except Exception as err:
         print(f"\nSorry, {path_} may be a invalid PDF")
-        return None
+        return None, None
 
 
 ################################################################################
@@ -269,10 +269,10 @@ def get_org_links(path_: Path, lineno: int, line: str) -> List[str]:
         try:
             url_desc, rest = rest.split(']]', 1)
         except ValueError as err:
-            print(path_)
-            print(f"{lineno:,d}")
-            print(line)
-            print(err)
+            # print(path_)
+            # print(f"{lineno:,d}")
+            # print(line)
+            # print(err)
             return None
 
         if '][' in url_desc:
@@ -280,10 +280,10 @@ def get_org_links(path_: Path, lineno: int, line: str) -> List[str]:
             try:
                 url, desc = url_desc.split('][')
             except ValueError as err:
-                print(path_)
-                print(f"{lineno:,d}")
-                print(line)
-                print(err)
+                # print(path_)
+                # print(f"{lineno:,d}")
+                # print(line)
+                # print(err)
                 return None
         else:
             # [[https:/www.google.com]]
@@ -292,10 +292,10 @@ def get_org_links(path_: Path, lineno: int, line: str) -> List[str]:
         try:
             _, line = line.split(']]', 1)  # Any more on the line?
         except ValueError as err:
-            print(path_)
-            print(f"{lineno:,d}")
-            print(line)
-            print(err)
+            # print(path_)
+            # print(f"{lineno:,d}")
+            # print(line)
+            # print(err)
             return None
 
     return return_
