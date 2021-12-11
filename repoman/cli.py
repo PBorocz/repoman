@@ -14,14 +14,13 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-import db
-from sqlite3 import Connection
-
 import constants as c
+import db_operations as dbo
+import db_logical as dbl
+import db_physical as dbp
 from cli_state import get_state, save_state
 from index import index
-from utils import get_user_history_path, AnonymousObj
-
+from utils import get_user_history_path
 
 def italic(str_):
     return f"[italic]{str_}[/italic]"
@@ -32,23 +31,20 @@ INTRODUCTION = f"""Welcome to RepoMan!
 """
 PROMPT = 'repoman> '
 
-# c.DEFAULT_BOX_STYLE = box.SIMPLE_HEAVY
-
-
-# Primary CLI/UI for repoman
+# Primary CLI/UI for RepoMan!
 @click.command()
 @click.option('--verbose/--no-verbose', default=False, help='Verbose mode?')
 def cli(verbose: bool) -> None:
-    
+
     console = Console()
     console.clear()
-    
+
     print(Figlet(font='standard').renderText('Repo-Man'))
     console.print(INTRODUCTION)
 
     # Create prompt session to allow commands over sessions.
     session = PromptSession(history=FileHistory(get_user_history_path()))
-    
+
     while True:
         try:
             response = session.prompt(PROMPT)
@@ -59,51 +55,51 @@ def cli(verbose: bool) -> None:
             break
 
         if response:            # As Ahnold would say...DOO EET!
-            execute(verbose, response)
+            with dbp.database.connection_context() as ctx:
+                execute(verbose, response)
 
-            
+
 def execute(verbose: bool, response: str) -> bool:
     """Execute the "response" provided, determining whether or not
     it's a "command" or "simply" a query to be executed."""
-    console = Console()
-    conn = db.get_db_conn()
-    # Look for command before assuming a query...
-    if response.startswith('.'):
-        #####################################################
-        # It's a *command*...
-        #####################################################
+    console = Console()      # Every command is going to put out to the console.
+
+    # Look for a "command" before assuming a query...
+    if not response.startswith('.'):
+        # A query!
+            query(console, response)
+    else:
+        # An internal *command*...
         s_method = response[1:]
+
         try:
+            # Do we recognise the command? (ie. do we have a command_<command> defined for it?)
             method = globals()[f"command_{s_method}"]
         except KeyError:
             console.print(f"Sorry, [red bold]{response}[/red bold] is not a known command (.help to list them)")
             return False
+        # Good to go, clear our console and run the command
         console.clear()
-        return method(console, conn, verbose)
-    else:
-        #####################################################
-        # Otherwise, we assume "response" represents a query!
-        #####################################################
-        query(console, conn, response)
+        return method(console, verbose)
 
-        
-def query(console: Console, conn: Connection, query_string: str) -> None:
+
+def query(console: Console, query_string: str) -> None:
     """Execute a query against the doc store"""
-    
+
     def _display_query_results(console, results: list) -> None:
         table = Table(show_header=True, header_style="bold", box=c.DEFAULT_BOX_STYLE)
         table.add_column("Path")
         table.add_column("LastMod")
         table.add_column("Snippet")
-        for row in results:
+        for obj in results:
             table.add_row(
-                row.path,
-                row.last_mod.split(' ')[0],  # Don't need time..
-                row.snippet,
+                obj.path,
+                obj.last_mod.split(' ')[0],  # Don't need time..
+                obj.snippet,
             )
         console.print(table)
-    
-    results = db.query(conn, query_string)
+
+    results = dbo.query(query_string)
     if results:
         console.clear()
         _display_query_results(console, results)
@@ -111,14 +107,14 @@ def query(console: Console, conn: Connection, query_string: str) -> None:
         console.print(f"Sorry, nothing matched: [italic]'{query_string}'[/italic]\n")
 
 ################################################################################
-# Management commands 
+# Management commands
 ################################################################################
-def command_status(console: Console, conn: Connection, verbose: bool) -> None:
+def command_status(console: Console, verbose: bool) -> None:
     """Display the overall status of the database"""
-    status = db.status(conn)
+    status = dbo.status()
     if not status:
         return
-    
+
     if not status.total_docs:
         console.print("[bold italic]No[/bold italic] documents have been indexed yet, database is empty.")
         return
@@ -127,10 +123,10 @@ def command_status(console: Console, conn: Connection, verbose: bool) -> None:
     table = Table(show_header=True, show_footer=True, box=c.DEFAULT_BOX_STYLE)
     table.add_column("Suffix", footer=Text("Total"))
     table.add_column("Documents", footer=Text(f"{status.total_docs:,d}"), justify="right")
-    for (suffix, count) in status.suffix_counts:
+    for (suffix, count) in status.suffix_counts.items():
         table.add_row(suffix, f"{count:,d}")
     console.print(table)
-    
+
     if status.total_tags:
         console.print(f"Total tags  : [bold]{status.total_tags:,d}[/bold]")
 
@@ -138,22 +134,22 @@ def command_status(console: Console, conn: Connection, verbose: bool) -> None:
     if status.total_links:
         console.print(f"Total links : [bold]{status.total_links:,d}[/bold]")
 
-        
-def command_tags(console: Console, conn: Connection, verbose: bool) -> None:
+
+def command_tags(console: Console, verbose: bool) -> None:
     """Display a summary of tags encountered."""
-    tag_counts = db.tag_count(conn)
+    tag_counts = dbo.tag_count()
     if not tag_counts:
         console.print("[bold italic]No[/bold italic] tags have been encountered yet.")
     else:
         table = Table(show_header=True, show_footer=True, box=box.SIMPLE_HEAVY)
         table.add_column("Tag")
         table.add_column("Documents")
-        for (suffix, count) in tag_counts:
-            table.add_row(suffix, f"{count:,d}")
+        for dt_ in tag_counts:
+            table.add_row(dt_.tag, f"{dt_.COUNT:,d}")
         console.print(table)
 
-        
-def command_index(console: Console, conn: Connection, verbose: bool) -> bool:
+
+def command_index(console: Console, verbose: bool) -> bool:
     """Index a set of files (by root directory and/or suffix)"""
 
     def sub_prompt(prompt_: str, default_: str) -> str:
@@ -170,7 +166,7 @@ def command_index(console: Console, conn: Connection, verbose: bool) -> bool:
     if not Path(index_command.root).expanduser().exists():
         print(f"Sorry, {index_command.root} does not exist")
         return False  # Don't pass go and definitely, don't update state!
-    
+
     # What file suffix to index (if any)
     index_command.suffix = sub_prompt('Suffix', index_command.suffix)
 
@@ -185,39 +181,49 @@ def command_index(console: Console, conn: Connection, verbose: bool) -> bool:
     ############################################################
     num_indexed, time_taken = index(True, index_command)
     if num_indexed:
-        docs_per_sec = num_indexed / time_taken
+
+        metric_value = num_indexed / time_taken
+        if metric_value > 1.0:
+            metric_desc = "Documents per Sec"
+        else:
+            metric_desc = "Seconds per Doc"
+            metric_value = 1.0 / metric_value
+
         table = Table(show_header=False, box=c.DEFAULT_BOX_STYLE)
         table.add_column("-")
         table.add_column("-", justify="right")
         table.add_row(f"Total Documents"  , f"[bold]{num_indexed:,d}[/bold]")
         table.add_row(f"Total Time (sec)" , f"[bold]{time_taken:.4f}[/bold]")
-        table.add_row(f"Documents per sec", f"[bold]{docs_per_sec:.4f}[/bold]")
+        table.add_row(f"{metric_desc}"    , f"[bold]{metric_value:.4f}[/bold]")
         console.print(table)
     else:
         console.print("[bold]No[/bold] files indexed.")
-        
+
     return True
 
 
-def command_createdb(console: Console, con: Connection, verbose: bool) -> None:
-    """Create the schema in an existing database (requires confirmation)"""
-    db.create(con)
+def command_db_create(console: Console, verbose: bool) -> None:
+    """Create the schema in an existing database."""
+    # FIXME: Confirmation!!!
+    dbl.create_schema()
     console.print(f"Database [bold]created[/bold].")
 
-    
-def command_dropdb(console: Console, con: Connection, verbose: bool) -> None:
-    """Delete the database (requires confirmation)"""
-    db.drop(con)
+
+def command_db_drop(console: Console, verbose: bool) -> None:
+    """Delete the database."""
+    # FIXME: Confirmation!!!
+    dbp.drop()
     console.print(f"Database [bold]dropped[/bold].")
 
-    
-def command_cleardb(console: Console, con: Connection, verbose: bool) -> None:
-    """Clean out the database of all data (requires confirmation)"""
-    db.clear(con)
+
+def command_db_clear(console: Console, verbose: bool) -> None:
+    """Clean out the database of all data."""
+    # FIXME: Confirmation!!!
+    dbl.clear()
     console.print(f"Database [bold]cleared[/bold].")
 
-    
-def command_help(console: Console, con: Connection, verbose: bool):
+
+def command_help(console: Console, verbose: bool):
     """Display the list of all RepoMan commands available."""
     # Display the list of all commands available by finding all the methods in this module that start with "command_" and using their doc-strings as the "help" text for their operation.
     def check_func(name, func):
@@ -233,7 +239,7 @@ def command_help(console: Console, con: Connection, verbose: bool):
         docs = docs.replace("\n", "")
         docs = re.sub('\s+',' ', docs)
         commands.append((name, docs))
-    
+
 
     console.print("- All entries that don't start with '.' are consider queries.")
     console.print("- Entries start with '.' are RepoMan commands:")

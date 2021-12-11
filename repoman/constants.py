@@ -12,6 +12,7 @@ if not REPOMAN_PATH.exists():
     REPOMAN_PATH.mkdir(parents=True)
 
 DB_PATH = REPOMAN_PATH / Path(REPOMAN_DB)
+DB_DATETIME_FORMAT = '%Y-%m-%d %H:%M'
 
 # State management of cli command history.
 DEFAULTS = {

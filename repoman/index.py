@@ -10,15 +10,14 @@ from copy import copy
 from pathlib import Path
 from typing import Tuple, Iterable, List, Set, Dict, Optional
 
-from sqlite3 import Connection
-
 from pdfminer.high_level import extract_text
 from pdfminer.pdftypes import PDFException
 
 from rich import print
 from rich.progress import track
 
-from db import get_db_conn, upsert_doc, get_paths_already_indexed
+import db_physical as dbp
+import db_operations as dbo
 from utils import AnonymousObj, progressIndicator, timer
 
 
@@ -62,12 +61,21 @@ def index(verbose: bool, index_command: AnonymousObj) -> Tuple[int, float]:
         index_command.suffix,
         b_force)
 
+    # DEBUG!!!
+    paths_to_index = paths_to_index[0:10]
+
+    # Go!
+    start = time.time()
+
+    if len(paths_to_index) == 1:
+        for path_ in paths_to_index:
+            _index(path_)
+        return len(paths_to_index), time.time() - start
+
     # Set up our processing pool based on the number of documents to index.
     pool_size = multiprocessing.cpu_count() * 2 if len(paths_to_index) > 100 else 1
     pool = multiprocessing.Pool(processes=pool_size)
 
-    # Go!
-    start = time.time()
     pool_outputs = pool.map(_index, paths_to_index)
 
     # Wait for all to finish..
@@ -93,7 +101,8 @@ def _paths_to_index(
     return_ = list()
 
     # Before we start, what files have already been index?
-    paths_already_indexed = get_paths_already_indexed(get_db_conn())
+    with dbp.database.connection_context() as ctx:
+        paths_already_indexed = dbo.get_paths_already_indexed()
 
     for path_ in walker(path_dir, arg_suffix, SKIP_DIRS, INCLUDE_EXTENSIONS):
         if arg_force:
@@ -119,7 +128,7 @@ def _paths_to_index(
 
     return return_
 
-def _index(path_) -> bool:
+def _index(path_) -> int:
     """Index the file on the specified path on a thread-safe basis"""
     so_doc = AnonymousObj(
         path_  = path_,
@@ -143,11 +152,8 @@ def _index(path_) -> bool:
 
     # Update/insert the doc into our database
     # (get a conn here as we might be in a separate thread from the main index method)
-    con = get_db_conn()
-    doc_id = upsert_doc(con, so_doc)
-    con.commit()
-
-    return doc_id
+    with dbp.database.connection_context() as ctx:
+        return dbo.upsert_doc(so_doc)
 
 
 def get_text_from_txt(path_, suffix="txt") -> Tuple[str, Optional[list[str]]]:
