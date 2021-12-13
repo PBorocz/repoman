@@ -129,7 +129,6 @@ def upsert_doc(a_doc: AnonymousObj) -> int:
                 DocumentLink.url    : url,
                 DocumentLink.desc   : desc,
             }).execute()
-        print(f"Inserted {len(doc.links)} links!")
 
     return doc_id
 

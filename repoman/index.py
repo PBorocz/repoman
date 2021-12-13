@@ -62,16 +62,8 @@ def index(verbose: bool, index_command: AnonymousObj) -> tuple[int, float]:
         index_command.suffix,
         b_force)
 
-    # DEBUG!!!
-    # paths_to_index = paths_to_index[0:10]
-
     # Go!
     start = time.time()
-
-    for path_ in paths_to_index:
-        _index(path_)
-    return len(paths_to_index), time.time() - start
-
 
     # Set up our processing pool based on the number of documents to index.
     pool_size = multiprocessing.cpu_count() * 2 if len(paths_to_index) > 100 else 1
@@ -292,9 +284,6 @@ def get_org_links(path_: Path, line: str) -> list[str]:
         try:
             url_desc, rest = rest.split(']]', 1)
         except ValueError as err:
-            # print(path_)
-            # print(line)
-            # print(err)
             return None
 
         if '][' in url_desc:
@@ -302,9 +291,6 @@ def get_org_links(path_: Path, line: str) -> list[str]:
             try:
                 url, desc = url_desc.split('][')
             except ValueError as err:
-                # print(path_)
-                # print(line)
-                # print(err)
                 return None
         else:
             # [[https:/www.google.com]]
