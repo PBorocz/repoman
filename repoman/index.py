@@ -35,6 +35,7 @@ SKIP_DIRS = (
 )
 
 INCLUDE_EXTENSIONS = (
+    ".md",
     ".txt",
     ".org",
     ".gif",
@@ -52,7 +53,7 @@ YYYY_MM_DD_PATTERN     = re.compile(r'^(\d{4,4})-([01]\d)-([0123]\d)[- _T]')
 ################################################################################
 # CORE METHOD: Get an iterator of files to be indexed and return the number that worked.
 ################################################################################
-def index(verbose: bool, index_command: AnonymousObj) -> tuple[int, float]:
+def index(index_command: AnonymousObj, verbose: bool) -> tuple[int, float]:
 
     b_force = False if not index_command.force or not index_command.force.lower().startswith('y') else True
 
@@ -62,8 +63,10 @@ def index(verbose: bool, index_command: AnonymousObj) -> tuple[int, float]:
         index_command.suffix,
         b_force)
 
-    # Set up our processing pool based on the number of documents to index..
-    pool_size = multiprocessing.cpu_count() * 2 if len(paths_to_index) > 100 else 1
+    # Set up our processing pool based on:
+    # 1 - the number of documents to index and
+    # 2 - one less than the number of cores we think are available.
+    pool_size = (multiprocessing.cpu_count() * 2) - 1 if len(paths_to_index) > 100 else 1
     pool = multiprocessing.Pool(processes=pool_size)
 
     # ..Let 'em loose!
@@ -135,6 +138,7 @@ def _index(path_) -> Optional[int]:
     # For specific extensions that we *can* get meaningful text from,
     # find the specific method to do so and get it!
     get_text_method = dict(
+        md  = get_text_from_txt, # For now, treat Markdown as simple text..
         txt = get_text_from_txt,
         org = get_text_from_org,
         pdf = get_text_from_pdf,
