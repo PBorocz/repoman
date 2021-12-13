@@ -42,12 +42,13 @@ def query(query_string: str):
             doc = doc_objs.get(fts.rowid)
             doc_path = Path(doc.path)
             ao_doc = AnonymousObj(
-                doc_id   = doc.id,
-                rank     = f"{fts.bm25:.2f}",
-                path     = str(doc_path.relative_to(*doc_path.parts[:3])),
-                suffix   = doc.suffix,
-                last_mod = doc.last_mod,
-                snippet  = fts.snippet,
+                doc_id    = doc.id,
+                rank      = f"{fts.bm25:.2f}",
+                path_full = doc_path,
+                path_rel  = str(doc_path.relative_to(*doc_path.parts[:3])), # FIXME! Won't always be 3!!
+                suffix    = doc.suffix,
+                last_mod  = doc.last_mod,
+                snippet   = fts.snippet,
             )
             return_.append(ao_doc)
 
@@ -67,18 +68,18 @@ def query(query_string: str):
         for doc in docs:
             doc_path = Path(doc.path)
             ao_doc = AnonymousObj(
-                rank     = f" 0.00",
-                path     = str(doc_path.relative_to(*doc_path.parts[:3])),
-                suffix   = doc.suffix,
-                last_mod = doc.last_mod,
-                snippet  = f"Tag: >>>{tag}<<<",
+                rank      = f" 0.00",
+                path_full = doc_path,
+                path_rel  = str(doc_path.relative_to(*doc_path.parts[:3])),
+                suffix    = doc.suffix,
+                last_mod  = doc.last_mod,
+                snippet   = f"Tag: >>>{tag}<<<",
             )
             return_.append(ao_doc)
         return return_
 
-    docs_from_fts, doc_ids  = get_docs_from_fts (query_string)
-    docs_from_tags  = get_docs_from_tags(doc_ids, query_string)
-    docs_from_links = get_docs_from_links(doc_ids, query_string)
+    docs_from_fts, doc_ids = get_docs_from_fts (query_string)
+    docs_from_tags         = get_docs_from_tags(doc_ids, query_string)
 
     return docs_from_tags + docs_from_fts
 
