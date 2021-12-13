@@ -1,4 +1,5 @@
 #!/usr/bin/env py
+import os
 import re
 import sys
 import inspect
@@ -7,7 +8,9 @@ from textwrap import dedent
 
 import click
 from prompt_toolkit import PromptSession, prompt
+from prompt_toolkit.completion import PathCompleter
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.validation import Validator, ValidationError
 from pyfiglet import Figlet
 from rich import box
 from rich.console import Console
@@ -32,6 +35,9 @@ INTRODUCTION = f"""Welcome to RepoMan!
 {italic('.help')} for help.
 """
 PROMPT = 'repoman> '
+
+LAST_QUERY_RESULT = None
+
 
 # Primary CLI/UI for RepoMan!
 @click.command()
@@ -72,23 +78,34 @@ def execute(verbose: bool, response: str) -> bool:
         query(console, response)
     else:
         # An internal *command*...
-        s_method = response[1:]
+        s_response = response[1:]
 
-        try:
-            # Do we recognise the command? (ie. do we have a command_<command> defined for it?)
-            method = globals()[f"command_{s_method}"]
-        except KeyError:
-            console.print(f"Sorry, [red bold]{response}[/red bold] is not a known command (.help to list them)")
-            return False
-        # Good to go, clear our console and run the command
-        console.clear()
-        return method(console, verbose)
+        command_method = globals().get(f"command_{s_response}", None)
+        if command_method:
+            # Good to go, clear our console and run the command
+            console.clear()
+            return command_method(console, verbose)
+        else:
+            # Confirm that it's a file "selection" from the previous query..
+            try:
+                ith = int(s_response)
+            except ValueError:
+                console.print(f"Sorry, [red bold]{response}[/red bold] is not a known command (.help to list them)")
+                return False
+
+            # Lookup and open the "ith" file in the last query!
+            path_full = LAST_QUERY_RESULT[ith-1].path_full
+            home_dir = os.system(f'open "{path_full}"')
 
 
 def query(console: Console, query_string: str) -> None:
     """Execute a query against the doc store"""
+    global LAST_QUERY_RESULT
 
     def markup_snippet(snippet):
+        """On our queries, we can't use the Rich markup to delineate matching text,
+        here, we "undo" that and convert to that which'll be displayed to the user.
+        """
         snippet = escape(snippet)
         snippet = snippet.replace(">>>", "[green bold]")
         snippet = snippet.replace("<<<", "[/]")
@@ -96,18 +113,22 @@ def query(console: Console, query_string: str) -> None:
 
     def _display_query_results(console, results: list) -> None:
         table = Table(show_header=True, header_style="bold", box=c.DEFAULT_BOX_STYLE)
+        table.add_column("#")
         table.add_column("Path")
         table.add_column("Snippet")
         table.add_column("LastMod")
-        for obj in results:
+        for ith, obj in enumerate(results, 1):
             table.add_row(
-                obj.path,
+                f"{ith:,d}",
+                obj.path_rel,
                 markup_snippet(obj.snippet),
                 obj.last_mod.split(' ')[0],  # Don't need time..
             )
         console.print(table)
 
     results = dbo.query(query_string)
+    LAST_QUERY_RESULT = results # Store away for subsequent use!
+
     if results:
         console.clear()
         _display_query_results(console, results)
@@ -171,11 +192,20 @@ def command_links(console: Console, verbose: bool) -> None:
         console.print(table)
 
 
+class PathValidator(Validator):
+    def validate(self, document):
+        path = Path(document.text)
+        if not path.exists():
+            raise ValidationError(message="Sorry, this path doesn't exist")
+        if not path.is_dir():
+            raise ValidationError(message="Sorry, this path isn't a directory")
+
+
 def command_index(console: Console, verbose: bool) -> bool:
     """Index a set of files (by root directory and/or suffix)"""
 
-    def sub_prompt(prompt_: str, default_: str) -> str:
-        return prompt(f"{prompt_:11s} : ", default=default_)
+    def sub_prompt(prompt_: str, default_: str, *args, **kwargs) -> str:
+        return prompt(f"{prompt_:11s} : ", default=default_, *args, **kwargs)
 
     # Get the values we last used for this command..
     index_command = get_state("index")
@@ -184,10 +214,11 @@ def command_index(console: Console, verbose: bool) -> bool:
     # Using these as defaults, prompt for any updated values
     ############################################################
     # Root directory to index from..
-    index_command.root = sub_prompt('Root',index_command.root)
-    if not Path(index_command.root).expanduser().exists():
-        print(f"Sorry, {index_command.root} does not exist")
-        return False  # Don't pass go and definitely, don't update state!
+    index_command.root = sub_prompt(
+        'Root',
+        index_command.root,
+        completer=PathCompleter(only_directories=True),
+        validator=PathValidator())
 
     # What file suffix to index (if any)
     index_command.suffix = sub_prompt('Suffix', index_command.suffix)
@@ -201,26 +232,26 @@ def command_index(console: Console, verbose: bool) -> bool:
     ############################################################
     # DO IT!
     ############################################################
-    num_indexed, time_taken = index(True, index_command)
-    if num_indexed:
-
-        metric_value = num_indexed / time_taken
-        if metric_value > 1.0:
-            metric_desc = "Documents per Sec"
-        else:
-            metric_desc = "Seconds per Doc"
-            metric_value = 1.0 / metric_value
-
-        table = Table(show_header=False, box=c.DEFAULT_BOX_STYLE)
-        table.add_column("-")
-        table.add_column("-", justify="right")
-        table.add_row(f"Total Documents"  , f"[bold]{num_indexed:,d}[/bold]")
-        table.add_row(f"Total Time (sec)" , f"[bold]{time_taken:.4f}[/bold]")
-        table.add_row(f"{metric_desc}"    , f"[bold]{metric_value:.4f}[/bold]")
-        console.print(table)
-    else:
+    num_indexed, time_taken = index(index_command, True)
+    if not num_indexed:
         console.print("[bold]No[/bold] files indexed.")
+        return False
 
+    # Print a nice summary of what we did..
+    metric_value = num_indexed / time_taken
+    if metric_value > 1.0:
+        metric_desc = "Documents per Sec"
+    else:
+        metric_desc = "Seconds per Doc"
+        metric_value = 1.0 / metric_value
+
+    table = Table(show_header=False, box=c.DEFAULT_BOX_STYLE)
+    table.add_column("-")
+    table.add_column("-", justify="right")
+    table.add_row(f"Total Documents"  , f"[bold]{num_indexed:,d}[/bold]")
+    table.add_row(f"Total Time (sec)" , f"[bold]{time_taken:.4f}[/bold]")
+    table.add_row(f"{metric_desc}"    , f"[bold]{metric_value:.4f}[/bold]")
+    console.print(table)
     return True
 
 
