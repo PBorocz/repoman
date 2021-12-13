@@ -62,20 +62,19 @@ def index(verbose: bool, index_command: AnonymousObj) -> tuple[int, float]:
         index_command.suffix,
         b_force)
 
-    # Go!
-    start = time.time()
-
-    # Set up our processing pool based on the number of documents to index.
+    # Set up our processing pool based on the number of documents to index..
     pool_size = multiprocessing.cpu_count() * 2 if len(paths_to_index) > 100 else 1
     pool = multiprocessing.Pool(processes=pool_size)
 
+    # ..Let 'em loose!
+    start = time.time()
     pool_outputs = pool.map(_index, paths_to_index)
 
-    # Wait for all to finish..
+    # ..and wait for all to finish.
     pool.close()
     pool.join()
-    end = time.time()
 
+    # Return the number of file paths we indexed *and* how long it took!
     return len(pool_outputs), time.time() - start
 
 
@@ -252,7 +251,7 @@ def get_last_mod(path_: Path)-> str:
     components = re.match(YYYY_MM_DD_PATTERN, path_.name)
     if components:
         yyyy, mm, dd = [components.group(1), components.group(2), components.group(3)]
-        return f"{yyyy}-{int(mm):02d}-{int(dd):02d} 00:00:00"
+        return f"{yyyy}-{int(mm):02d}-{int(dd):02d} 00:00"
 
     f_mtime = path_.stat().st_mtime
     return datetime.datetime.fromtimestamp(f_mtime).strftime(c.DB_DATETIME_FORMAT)
@@ -264,9 +263,9 @@ def get_tags(path_: Path) -> list[str]:
 
     RegEx's cribbed from https://github.com/novoid/filetags/blob/master/filetags/__init__.py
     """
-    components = re.match(FILE_WITH_TAGS_REGEX, path_.name)
+    components = re.match(FILE_WITH_TAGS_REGEX, path_.stem)
     if components:
-        return components.group(2).split(' ')
+        return [tag for tag in components.group(2).split(' ') if tag]
     return []
 
 
