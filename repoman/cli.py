@@ -11,8 +11,10 @@ from prompt_toolkit.history import FileHistory
 from pyfiglet import Figlet
 from rich import box
 from rich.console import Console
+from rich.prompt import Confirm
 from rich.table import Table
 from rich.text import Text
+from rich.markup import escape
 
 import constants as c
 import db_operations as dbo
@@ -67,7 +69,7 @@ def execute(verbose: bool, response: str) -> bool:
     # Look for a "command" before assuming a query...
     if not response.startswith('.'):
         # A query!
-            query(console, response)
+        query(console, response)
     else:
         # An internal *command*...
         s_method = response[1:]
@@ -86,16 +88,22 @@ def execute(verbose: bool, response: str) -> bool:
 def query(console: Console, query_string: str) -> None:
     """Execute a query against the doc store"""
 
+    def markup_snippet(snippet):
+        snippet = escape(snippet)
+        snippet = snippet.replace(">>>", "[green bold]")
+        snippet = snippet.replace("<<<", "[/]")
+        return snippet
+
     def _display_query_results(console, results: list) -> None:
         table = Table(show_header=True, header_style="bold", box=c.DEFAULT_BOX_STYLE)
         table.add_column("Path")
-        table.add_column("LastMod")
         table.add_column("Snippet")
+        table.add_column("LastMod")
         for obj in results:
             table.add_row(
                 obj.path,
+                markup_snippet(obj.snippet),
                 obj.last_mod.split(' ')[0],  # Don't need time..
-                obj.snippet,
             )
         console.print(table)
 
@@ -146,6 +154,20 @@ def command_tags(console: Console, verbose: bool) -> None:
         table.add_column("Documents")
         for dt_ in tag_counts:
             table.add_row(dt_.tag, f"{dt_.COUNT:,d}")
+        console.print(table)
+
+
+def command_links(console: Console, verbose: bool) -> None:
+    """Display a summary of links encountered."""
+    link_counts = dbo.link_summary()
+    if not link_counts:
+        console.print("[bold italic]No[/bold italic] links have been encountered yet.")
+    else:
+        table = Table(show_header=True, show_footer=True, box=box.SIMPLE_HEAVY)
+        table.add_column("Tag")
+        table.add_column("Documents")
+        for obj in link_counts:
+            table.add_row(obj.url, f"{obj.count:,d}")
         console.print(table)
 
 
@@ -205,22 +227,23 @@ def command_index(console: Console, verbose: bool) -> bool:
 def command_db_create(console: Console, verbose: bool) -> None:
     """Create the schema in an existing database."""
     # FIXME: Confirmation!!!
-    dbl.create_schema()
-    console.print(f"Database [bold]created[/bold].")
+    if Confirm.ask("Are you sure?", default=False):
+        dbl.create_schema()
+        console.print(f"Database [bold]created[/bold].")
 
 
 def command_db_drop(console: Console, verbose: bool) -> None:
     """Delete the database."""
-    # FIXME: Confirmation!!!
-    dbp.drop()
-    console.print(f"Database [bold]dropped[/bold].")
+    if Confirm.ask("Are you sure?", default=False):
+        dbp.drop()
+        console.print(f"Database [bold]dropped[/bold].")
 
 
 def command_db_clear(console: Console, verbose: bool) -> None:
     """Clean out the database of all data."""
-    # FIXME: Confirmation!!!
-    dbl.clear()
-    console.print(f"Database [bold]cleared[/bold].")
+    if Confirm.ask("Are you sure?", default=False):
+        dbl.clear()
+        console.print(f"Database [bold]cleared[/bold].")
 
 
 def command_help(console: Console, verbose: bool):

@@ -1,10 +1,11 @@
 # All methods for interfacing with and managing the SQLite database.
 import sys
 from collections import defaultdict
-from sqlite3 import connect, OperationalError
-from sqlite3 import Connection  # typing...
 from pathlib import Path
+from sqlite3 import Connection  # typing...
+from sqlite3 import connect, OperationalError
 from typing import List, Dict, Tuple
+from urllib.parse import urlparse
 
 from pdfminer.pdfparser import PDFSyntaxError
 from peewee import fn
@@ -26,7 +27,7 @@ def query(query_string: str):
                .select(
                    DocumentFTS,
                    DocumentFTS.bm25().alias('bm25'),
-                   DocumentFTS.body.snippet('[green bold]', '[/green bold]', max_tokens=5).alias('snippet'))
+                   DocumentFTS.body.snippet('>>>', '<<<', max_tokens=5).alias('snippet'))
                .order_by(DocumentFTS.bm25().desc())
                )
         doc_ids = [doc.rowid for doc in fts]
@@ -57,6 +58,7 @@ def query(query_string: str):
         if not query:
             return []
 
+        # Depup against what we've already queried.
         tag_doc_ids = {dt_.doc_id for dt_ in query if dt_.doc_id not in doc_ids}
 
         docs = Document.select().where(Document.id.in_(tag_doc_ids))
@@ -69,13 +71,14 @@ def query(query_string: str):
                 path     = str(doc_path.relative_to(*doc_path.parts[:3])),
                 suffix   = doc.suffix,
                 last_mod = doc.last_mod,
-                snippet  = f"Matched Tag: '[blue bold]{tag}[/blue bold]'",
+                snippet  = f"Tag: >>>{tag}<<<",
             )
             return_.append(ao_doc)
         return return_
 
     docs_from_fts, doc_ids  = get_docs_from_fts (query_string)
-    docs_from_tags = get_docs_from_tags(doc_ids, query_string)
+    docs_from_tags  = get_docs_from_tags(doc_ids, query_string)
+    docs_from_links = get_docs_from_links(doc_ids, query_string)
 
     return docs_from_tags + docs_from_fts
 
@@ -91,14 +94,14 @@ def upsert_doc(a_doc: AnonymousObj) -> int:
     # Do any final cleansing of the text to make sure it's "insertable"!
     # If we didn't get any text, we still want to make an entry so we know
     # that we've considered the path already.
-    cleansed = a_doc.body.replace("'", '"') if a_doc.body else ''
+    cleansed = a_doc.body.replace("'", '"').replace("\n", "") if a_doc.body else ""
 
     # Do the insert..(note that body could be essentially empty, ie. '')
     doc = Document(
         path     = str(a_doc.path_),
         suffix   = a_doc.suffix,
         last_mod = a_doc.lmod,
-        last_idx = a_doc.lmod,    # FIXME!
+        last_idx = a_doc.now,
     )
     doc.save()
     doc_id = doc.id
@@ -110,16 +113,16 @@ def upsert_doc(a_doc: AnonymousObj) -> int:
     }).execute()
 
     # Do we have any tags to handle?
-    if doc.tags:
-        for tag in doc.tags:
+    if a_doc.tags:
+        for tag in a_doc.tags:
             DocumentTag.insert({
                 DocumentTag.doc_id : doc_id,
                 DocumentTag.tag    : tag,
             }).execute()
 
     # Do we have any links to handle?
-    if doc.links:
-        for link in doc.links:
+    if a_doc.links:
+        for link in a_doc.links:
             (url, desc) = link
             DocumentLink.insert({
                 DocumentLink.doc_id : doc_id,
@@ -181,6 +184,22 @@ def status() -> AnonymousObj:
 
     return return_
 
+
 def tag_count():
     """Count of documents per tag, order by count desc"""
     return DocumentTag.select(DocumentTag.tag, fn.COUNT()).group_by(DocumentTag.tag)
+
+
+def link_summary() -> list[AnonymousObj]:
+    """Summarise most popular link domains"""
+    domain_counts = defaultdict(int)
+    for link in DocumentLink.select():
+        parsed = urlparse(link.url)
+        domain_counts[parsed.netloc] += 1
+
+    # Sort by count descending before returning
+    return [
+        AnonymousObj(url=url, count=count)
+        for url, count in
+        sorted(domain_counts.items(), key=lambda count: count[1])
+    ]

@@ -21,14 +21,13 @@ class Document(Model):
 
 class DocumentFTS(FTS5Model):
     rowid = RowIDField()
-    path  = SearchField()       # Yes, we store path twice..here again so we can search on it..
+    path  = SearchField()  # Yes, we store path twice..here again so we can search on it..
     body  = SearchField()
 
     class Meta:
-        database = database
+        database   = database
         table_name = "document_fts"
-        # Use the porter stemming algorithm to tokenize content.
-        options = {'tokenize': 'porter'}
+        options    = {'tokenize': 'porter'}
 
 
 class DocumentTag(Model):
@@ -36,7 +35,7 @@ class DocumentTag(Model):
     tag = CharField()
 
     class Meta:
-        database = database
+        database   = database
         table_name = "document_tag"
 
 
@@ -46,11 +45,10 @@ class DocumentLink(Model):
     desc   = CharField(null=True)
 
     class Meta:
-        database = database
+        database   = database
         table_name = "document_link"
 
 MODELS = [Document, DocumentFTS, DocumentLink, DocumentTag]
-
 
 def create_schema():
     database.connect(reuse_if_open=True)
@@ -108,7 +106,7 @@ def test():
            .select(
                DocumentFTS,
                DocumentFTS.bm25().alias('bm25'),
-               DocumentFTS.body.highlight('[green bold]', '[/green bold]').alias('snippet'))
+               DocumentFTS.body.highlight('>>>', '<<<').alias('snippet'))
            .order_by(DocumentFTS.bm25().desc())
     )
     pp(list(res)[0].__dict__)

@@ -8,7 +8,7 @@ import time
 from collections import defaultdict
 from copy import copy
 from pathlib import Path
-from typing import Tuple, Iterable, List, Set, Dict, Optional
+from typing import Iterable, Optional
 
 from pdfminer.high_level import extract_text
 from pdfminer.pdftypes import PDFException
@@ -16,6 +16,7 @@ from pdfminer.pdftypes import PDFException
 from rich import print
 from rich.progress import track
 
+import constants as c
 import db_physical as dbp
 import db_operations as dbo
 from utils import AnonymousObj, progressIndicator, timer
@@ -51,7 +52,7 @@ YYYY_MM_DD_PATTERN     = re.compile(r'^(\d{4,4})-([01]\d)-([0123]\d)[- _T]')
 ################################################################################
 # CORE METHOD: Get an iterator of files to be indexed and return the number that worked.
 ################################################################################
-def index(verbose: bool, index_command: AnonymousObj) -> Tuple[int, float]:
+def index(verbose: bool, index_command: AnonymousObj) -> tuple[int, float]:
 
     b_force = False if not index_command.force or not index_command.force.lower().startswith('y') else True
 
@@ -62,15 +63,15 @@ def index(verbose: bool, index_command: AnonymousObj) -> Tuple[int, float]:
         b_force)
 
     # DEBUG!!!
-    paths_to_index = paths_to_index[0:10]
+    # paths_to_index = paths_to_index[0:10]
 
     # Go!
     start = time.time()
 
-    if len(paths_to_index) == 1:
-        for path_ in paths_to_index:
-            _index(path_)
-        return len(paths_to_index), time.time() - start
+    for path_ in paths_to_index:
+        _index(path_)
+    return len(paths_to_index), time.time() - start
+
 
     # Set up our processing pool based on the number of documents to index.
     pool_size = multiprocessing.cpu_count() * 2 if len(paths_to_index) > 100 else 1
@@ -128,7 +129,7 @@ def _paths_to_index(
 
     return return_
 
-def _index(path_) -> int:
+def _index(path_) -> Optional[int]:
     """Index the file on the specified path on a thread-safe basis"""
     so_doc = AnonymousObj(
         path_  = path_,
@@ -137,6 +138,7 @@ def _index(path_) -> int:
         links  = [],                  # "
         lmod   = get_last_mod(path_), # When was the file tagged or last modified?
         tags   = get_tags(path_),     # What are any file-specific (ie. Novoid) tags?
+        now    = datetime.datetime.now().strftime(c.DB_DATETIME_FORMAT)
     )
 
     # For specific extensions that we *can* get meaningful text from,
@@ -149,6 +151,9 @@ def _index(path_) -> int:
 
     if get_text_method:
         so_doc.body, so_doc.links = get_text_method(path_)
+    else:
+        print(f"Sorry, unrecognised file type: '{so_doc.suffix}', skipping.")
+        return None
 
     # Update/insert the doc into our database
     # (get a conn here as we might be in a separate thread from the main index method)
@@ -156,39 +161,51 @@ def _index(path_) -> int:
         return dbo.upsert_doc(so_doc)
 
 
-def get_text_from_txt(path_, suffix="txt") -> Tuple[str, Optional[list[str]]]:
+def get_text_from_txt(path_, suffix="txt") -> tuple[str, Optional[list[str]]]:
     """Get text from a txt file"""
     with open(path_, encoding=get_file_encoding(path_)) as fh_:
         return fh_.read(), None
 
 
-def get_text_from_org(path_, suffix="org") -> Tuple[str, Optional[list[str]]]:
+def get_text_from_org(path_, suffix="org") -> tuple[str, Optional[list[str]]]:
     """Get text and links from an org file"""
-    text  = []
-    links = []
-    encoding = get_file_encoding(path_)
-    try:
+
+    def iter_lines(path_):
+        """Open the file on 'path_' with the right encoding and yield lines.."""
+        encoding = get_file_encoding(path_)
         with open(path_, encoding=encoding, errors='ignore') as fh_:
-            for lineno, line in enumerate(fh_, 1):
-                clean = line.strip()
+            for line in fh_:
+                yield line
 
-                # Core text capture for filtering..
-                if clean:
-                    text.append(clean)
+    def filter_source_blocks(lines: Iterable) -> Iterable:
+        """Use a mini-state machine to filter out org source code blocks.."""
+        in_block = False
+        for line in lines:
+            lsl = line.strip().lower()
+            if lsl.startswith("#+begin_src"):
+                in_block = True
+                continue
+            if lsl.startswith("#+end_src"):
+                in_block = False
+                continue
+            if not in_block:
+                yield line
 
-                # Additionally, look for links..
-                links = get_org_links(path_, lineno, line.strip())
+    text_in_file  = []
+    links_in_file = []
 
-    except UnicodeDecodeError as err:
-        print(path_)
-        print(encoding)
-        print(err)
-        breakpoint()
+    for line in filter_source_blocks(iter_lines(path_)):
+        clean = line.strip()
+        if clean:
+            text_in_file.append(clean)
+            if line_links := get_org_links(path_, clean):
+                for link in line_links:
+                    links_in_file.append(link)
 
-    return ' '.join(text), links
+    return ' '.join(text_in_file), links_in_file
 
 
-def get_text_from_pdf(path_, suffix="pdf") -> Tuple[str, Optional[list[str]]]:
+def get_text_from_pdf(path_, suffix="pdf") -> tuple[str, Optional[list[str]]]:
     """Get text from a pdf file"""
     try:
         return extract_text(path_), None
@@ -246,10 +263,10 @@ def get_last_mod(path_: Path)-> str:
         return f"{yyyy}-{int(mm):02d}-{int(dd):02d} 00:00:00"
 
     f_mtime = path_.stat().st_mtime
-    return datetime.datetime.fromtimestamp(f_mtime).strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.datetime.fromtimestamp(f_mtime).strftime(c.DB_DATETIME_FORMAT)
 
 
-def get_tags(path_: Path) -> List[str]:
+def get_tags(path_: Path) -> list[str]:
     """Utility method to return any tags embedded in the file path if the filepath conforms to
     the 'Novoid' filetagging syntax, we can extract "tags".
 
@@ -261,7 +278,7 @@ def get_tags(path_: Path) -> List[str]:
     return []
 
 
-def get_org_links(path_: Path, lineno: int, line: str) -> List[str]:
+def get_org_links(path_: Path, line: str) -> list[str]:
     """The only extra thing we look for from org files are links.
     A set of primary cases here:
     - asdasdfsd [[https:/www.google.com][Google search]] asdf asdf asdf
@@ -276,7 +293,6 @@ def get_org_links(path_: Path, lineno: int, line: str) -> List[str]:
             url_desc, rest = rest.split(']]', 1)
         except ValueError as err:
             # print(path_)
-            # print(f"{lineno:,d}")
             # print(line)
             # print(err)
             return None
@@ -287,21 +303,18 @@ def get_org_links(path_: Path, lineno: int, line: str) -> List[str]:
                 url, desc = url_desc.split('][')
             except ValueError as err:
                 # print(path_)
-                # print(f"{lineno:,d}")
                 # print(line)
                 # print(err)
                 return None
         else:
             # [[https:/www.google.com]]
             url, desc = url_desc, None
+
         return_.append((url, desc))
+
         try:
             _, line = line.split(']]', 1)  # Any more on the line?
         except ValueError as err:
-            # print(path_)
-            # print(f"{lineno:,d}")
-            # print(line)
-            # print(err)
-            return None
+            ...
 
     return return_
