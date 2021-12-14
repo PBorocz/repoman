@@ -17,6 +17,7 @@ from rich import print
 from rich.progress import track
 
 import constants as c
+import db_logical as dbl
 import db_physical as dbp
 import db_operations as dbo
 from utils import AnonymousObj, progressIndicator, timer
@@ -77,8 +78,10 @@ def index(index_command: AnonymousObj, verbose: bool) -> tuple[int, float]:
     pool.close()
     pool.join()
 
+    num_cleansed = cleanup()
+
     # Return the number of file paths we indexed *and* how long it took!
-    return len(pool_outputs), time.time() - start
+    return len(pool_outputs), num_cleansed, time.time() - start
 
 
 def _paths_to_index(
@@ -306,4 +309,15 @@ def get_org_links(path_: Path, line: str) -> list[str]:
         except ValueError as err:
             ...
 
+    return return_
+
+def cleanup() -> int:
+    """Go through all the documents currently stored and make sure that all of their
+    respective files still exist on disk, if not, delete the respective document."""
+    return_ = 0
+    with dbp.database.connection_context() as ctx:
+        for doc in dbl.Document.select():
+            if not Path(doc.path).exists():
+                doc.delete_instance(recursive=True)
+                return_ += 1
     return return_

@@ -232,27 +232,32 @@ def command_index(console: Console, verbose: bool) -> bool:
     ############################################################
     # DO IT!
     ############################################################
-    num_indexed, time_taken = index(index_command, True)
-    if not num_indexed:
-        console.print("[bold]No[/bold] files indexed.")
-        return False
+    num_indexed, num_cleansed, time_taken = index(index_command, True)
 
-    # Print a nice summary of what we did..
-    metric_value = num_indexed / time_taken
-    if metric_value > 1.0:
-        metric_desc = "Documents per Sec"
-    else:
-        metric_desc = "Seconds per Doc"
-        metric_value = 1.0 / metric_value
-
+    # Print a nice summary of what we did (based on what occurred)
     table = Table(show_header=False, box=c.DEFAULT_BOX_STYLE)
     table.add_column("-")
     table.add_column("-", justify="right")
-    table.add_row(f"Total Documents"  , f"[bold]{num_indexed:,d}[/bold]")
-    table.add_row(f"Total Time (sec)" , f"[bold]{time_taken:.4f}[/bold]")
-    table.add_row(f"{metric_desc}"    , f"[bold]{metric_value:.4f}[/bold]")
-    console.print(table)
-    return True
+
+    if num_indexed:
+        metric_value = num_indexed / time_taken
+        if metric_value > 1.0:
+            metric_desc = "Documents per Sec"
+        else:
+            metric_desc = "Seconds per Doc"
+            metric_value = 1.0 / metric_value
+        table.add_row(f"Documents Indexed", f"[bold]{num_indexed:,d}[/bold]")
+        table.add_row(f"Total Time (sec)" , f"[bold]{time_taken:.4f}[/bold]")
+        table.add_row(f"{metric_desc}"    , f"[bold]{metric_value:.4f}[/bold]")
+    if num_cleansed:
+        table.add_row(f"Entries Cleaned"  , f"[bold]{num_cleansed:,d}[/bold]")
+
+    if num_indexed or num_cleansed:
+        console.print(table)
+        return True
+
+    console.print("\n[bold]Nothing[/bold] done.\n")
+    return False
 
 
 def command_db_create(console: Console, verbose: bool) -> None:
