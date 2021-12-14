@@ -23,3 +23,11 @@ DEFAULTS = {
     },
 
 }
+
+def italic(str_):
+    return f"[italic]{str_}[/italic]"
+INTRODUCTION = f"""Welcome to RepoMan!
+{italic('Ctrl-D')}, {italic('.exit')} or {italic('.q')} to exit.
+{italic('.help')} for help.
+"""
+PROMPT = 'repoman> '

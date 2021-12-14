@@ -27,42 +27,34 @@ from cli_state import get_state, save_state
 from index import index
 from utils import get_user_history_path
 
-def italic(str_):
-    return f"[italic]{str_}[/italic]"
-
-INTRODUCTION = f"""Welcome to RepoMan!
-{italic('Ctrl-D')}, {italic('.exit')} or {italic('.q')} to exit.
-{italic('.help')} for help.
-"""
-PROMPT = 'repoman> '
-
 LAST_QUERY_RESULT = None
 
-
+################################################################################
 # Primary CLI/UI for RepoMan!
+################################################################################
 @click.command()
 @click.option('--verbose/--no-verbose', default=False, help='Verbose mode?')
 def cli(verbose: bool) -> None:
 
+    # Setup and introduction...
     console = Console()
     console.clear()
-
     print(Figlet(font='standard').renderText('Repo-Man'))
-    console.print(INTRODUCTION)
+    console.print(c.INTRODUCTION)
 
-    # Create prompt session to allow commands over sessions.
+    # Prompt session allow commands over sessions (!)
     session = PromptSession(history=FileHistory(get_user_history_path()))
 
     while True:
         try:
-            response = session.prompt(PROMPT)
+            response = session.prompt(c.PROMPT)
         except (KeyboardInterrupt, EOFError):
             break
 
         if response.lower() in (".exit", ".q"):  # Done?
             break
 
-        if response:            # As Ahnold would say...DOO EET!
+        if response:  # As Ahhhnold would say...DOO EET!
             with dbp.database.connection_context() as ctx:
                 execute(verbose, response)
 
@@ -73,11 +65,12 @@ def execute(verbose: bool, response: str) -> bool:
     console = Console()      # Every command is going to put out to the console.
 
     # Look for a "command" before assuming a query...
-    if not response.startswith('.'):
-        # A query!
-        query(console, response)
-    else:
-        # An internal *command*...
+
+
+    if response.startswith('.'):
+        #############################
+        # A *RepoMan* command
+        #############################
         s_response = response[1:]
 
         command_method = globals().get(f"command_{s_response}", None)
@@ -86,16 +79,35 @@ def execute(verbose: bool, response: str) -> bool:
             console.clear()
             return command_method(console, verbose)
         else:
-            # Confirm that it's a file "selection" from the previous query..
-            try:
-                ith = int(s_response)
-            except ValueError:
-                console.print(f"Sorry, [red bold]{response}[/red bold] is not a known command (.help to list them)")
-                return False
+            console.print(f"Sorry, [red bold]{response}[/red bold] is not a known command (.help to list them)")
+    elif response.startswith("!"):
+        #############################
+        # A Document command
+        #############################
+        try:
+            selected_file = int(response[1:])
+        except ValueError:
+            console.print(f"Sorry, [red bold]{response}[/red bold] isn't a valid document open command,")
+            console.print(f"Must be valid integer within the range of 1 -> {len(LAST_QUERY_RESULT)}.")
+            return False
 
-            # Lookup and open the "ith" file in the last query!
-            path_full = LAST_QUERY_RESULT[ith-1].path_full
-            home_dir = os.system(f'open "{path_full}"')
+        # Lookup and open the "selected_fileth" file in the last query!
+        try:
+            path_full = LAST_QUERY_RESULT[selected_file-1].path_full
+        except IndexError:
+            console.print(f"Sorry, [red bold]{response}[/red bold] must be between 1 and {len(LAST_QUERY_RESULT)}.")
+            return False
+
+        # Open the file based on the local system's file associations
+        home_dir = os.system(f'open "{path_full}"')
+
+    else:
+        #############################
+        # A query!
+        #############################
+        query(console, response)
+
+    return True
 
 
 def query(console: Console, query_string: str) -> None:
@@ -114,13 +126,13 @@ def query(console: Console, query_string: str) -> None:
     def _display_query_results(console, results: list) -> None:
         table = Table(show_header=True, header_style="bold", box=c.DEFAULT_BOX_STYLE)
         table.add_column("#")
-        table.add_column("Path")
+        table.add_column("File")
         table.add_column("Snippet")
         table.add_column("LastMod")
         for ith, obj in enumerate(results, 1):
             table.add_row(
                 f"{ith:,d}",
-                obj.path_rel,
+                obj.path_full.name,
                 markup_snippet(obj.snippet),
                 obj.last_mod.split(' ')[0],  # Don't need time..
             )
@@ -299,9 +311,16 @@ def command_help(console: Console, verbose: bool):
         docs = re.sub('\s+',' ', docs)
         commands.append((name, docs))
 
+    console.print("● All entries that don't start with '.' are consider queries.")
 
-    console.print("- All entries that don't start with '.' are consider queries.")
-    console.print("- Entries start with '.' are RepoMan commands:")
+    console.print("● Entries start with '!' are Document commands:")
+    table = Table(box=c.DEFAULT_BOX_STYLE)
+    table.add_column("Command")
+    table.add_column("Description")
+    table.add_row("!<i>", "Open the file associated with the number from the last query.")
+    console.print(table)
+
+    console.print("● Entries start with '.' are RepoMan commands:")
     table = Table(box=c.DEFAULT_BOX_STYLE)
     table.add_column("Command")
     table.add_column("Description")
