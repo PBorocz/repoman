@@ -78,6 +78,9 @@ def query(query_string: str):
             return_.append(ao_doc)
         return return_
 
+    ################################################################################
+    # Main: Query docs based on content *and* tag match:
+    ################################################################################
     docs_from_fts, doc_ids = get_docs_from_fts (query_string)
     docs_from_tags         = get_docs_from_tags(doc_ids, query_string)
 
@@ -85,7 +88,7 @@ def query(query_string: str):
 
 
 ################################################################################
-# Core method to insert a new document!
+# Core method to "index" a new document.
 ################################################################################
 def upsert_doc(a_doc: AnonymousObj) -> int:
 
@@ -95,9 +98,8 @@ def upsert_doc(a_doc: AnonymousObj) -> int:
     # Do any final cleansing of the text to make sure it's "insertable"!
     # If we didn't get any text, we still want to make an entry so we know
     # that we've considered the path already.
-    cleansed = a_doc.body.replace("'", '"').replace("\n", "") if a_doc.body else ""
 
-    # Do the insert..(note that body could be essentially empty, ie. '')
+    # Do the into the "master" table:
     doc = Document(
         path     = str(a_doc.path_),
         suffix   = a_doc.suffix,
@@ -105,40 +107,42 @@ def upsert_doc(a_doc: AnonymousObj) -> int:
         last_idx = a_doc.now,
     )
     doc.save()
-    doc_id = doc.id
 
+    # Now, insert the body content of the file into the text search table
+    # (note that body could be essentially empty, ie. '')
+    cleansed = a_doc.body.replace("'", '"').replace("\n", "") if a_doc.body else ""
     DocumentFTS.insert({
-        DocumentFTS.rowid : doc_id,
+        DocumentFTS.rowid : doc.id,
         DocumentFTS.path  : str(a_doc.path_),
         DocumentFTS.body  : cleansed,
     }).execute()
 
     # Do we have any tags to handle?
-    if a_doc.tags:
-        for tag in a_doc.tags:
-            DocumentTag.insert({
-                DocumentTag.doc_id : doc_id,
-                DocumentTag.tag    : tag,
-            }).execute()
+    for tag in a_doc.tags:
+        DocumentTag.insert({
+            DocumentTag.doc_id : doc.id,
+            DocumentTag.tag    : tag,
+        }).execute()
 
     # Do we have any links to handle?
-    if a_doc.links:
-        for link in a_doc.links:
-            (url, desc) = link
-            DocumentLink.insert({
-                DocumentLink.doc_id : doc_id,
-                DocumentLink.url    : url,
-                DocumentLink.desc   : desc,
-            }).execute()
+    for link in a_doc.links:
+        (url, desc) = link
+        DocumentLink.insert({
+            DocumentLink.doc_id : doc.id,
+            DocumentLink.url    : url,
+            DocumentLink.desc   : desc,
+        }).execute()
 
-    return doc_id
+    return doc.id
 
 
-@retry(OperationalError, tries=5, delay=1.0)
+@retry(OperationalError, tries=10, delay=1.0)
 def check_delete_existing(path_: Path) -> bool:
     """Does a row exist already for this path?
     - If so, nuke it and return True
     - If not, do nothing and return False.
+
+    If db is locked, keep trying..
     """
     docs = Document.select().where(Document.path == str(path_))
     if not docs:
