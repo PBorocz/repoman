@@ -141,20 +141,22 @@ def _index(path_) -> Optional[int]:
     # For specific extensions that we *can* get meaningful text from,
     # find the specific method to do so and get it!
     get_text_method = dict(
+        py  = get_text_from_txt, # For now, treat Python as simple text..
         md  = get_text_from_txt, # For now, treat Markdown as simple text..
         txt = get_text_from_txt,
         org = get_text_from_org,
         pdf = get_text_from_pdf,
     ).get(so_doc.suffix)
 
-    if get_text_method:
-        so_doc.body, so_doc.links = get_text_method(path_)
-    else:
-        print(f"Sorry, unrecognised file type: '{so_doc.suffix}', skipping.")
+    if not get_text_method:
         return None
 
-    # Update/insert the doc into our database
-    # (get a conn here as we might be in a separate thread from the main index method)
+    # Get the text of the document (along with any links encountered)...
+    so_doc.body, so_doc.links = get_text_method(path_)
+
+    # ..and update/insert a new document entry into our database.
+    # (get a database connection *here* as we might be in a separate
+    # thread from the main index method)
     with dbp.database.connection_context() as ctx:
         return dbo.upsert_doc(so_doc)
 

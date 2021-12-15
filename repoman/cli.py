@@ -49,9 +49,11 @@ def cli(verbose: bool) -> None:
         try:
             response = session.prompt(c.PROMPT)
         except (KeyboardInterrupt, EOFError):
+            console.print("[italic]Goodbye![/]")
             break
 
         if response.lower() in (".exit", ".q"):  # Done?
+            console.print("[italic]Goodbye![/]")
             break
 
         if response:  # As Ahhhnold would say...DOO EET!
