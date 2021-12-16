@@ -44,6 +44,7 @@ def query(query_string: str):
             ao_doc = AnonymousObj(
                 doc_id    = doc.id,
                 rank      = f"{fts.bm25:.2f}",
+                name      = doc_path.name,
                 path_full = doc_path,
                 path_rel  = str(doc_path.relative_to(*doc_path.parts[:3])), # FIXME! Won't always be 3!!
                 suffix    = doc.suffix,
@@ -69,6 +70,7 @@ def query(query_string: str):
             doc_path = Path(doc.path)
             ao_doc = AnonymousObj(
                 rank      = f" 0.00",
+                name      = doc_path.name,
                 path_full = doc_path,
                 path_rel  = str(doc_path.relative_to(*doc_path.parts[:3])),
                 suffix    = doc.suffix,
@@ -118,20 +120,22 @@ def upsert_doc(a_doc: AnonymousObj) -> int:
     }).execute()
 
     # Do we have any tags to handle?
-    for tag in a_doc.tags:
-        DocumentTag.insert({
-            DocumentTag.doc_id : doc.id,
-            DocumentTag.tag    : tag,
-        }).execute()
+    if a_doc.tags:
+        for tag in a_doc.tags:
+            DocumentTag.insert({
+                DocumentTag.doc_id : doc.id,
+                DocumentTag.tag    : tag,
+            }).execute()
 
     # Do we have any links to handle?
-    for link in a_doc.links:
-        (url, desc) = link
-        DocumentLink.insert({
-            DocumentLink.doc_id : doc.id,
-            DocumentLink.url    : url,
-            DocumentLink.desc   : desc,
-        }).execute()
+    if a_doc.links:
+        for link in a_doc.links:
+            (url, desc) = link
+            DocumentLink.insert({
+                DocumentLink.doc_id : doc.id,
+                DocumentLink.url    : url,
+                DocumentLink.desc   : desc,
+            }).execute()
 
     return doc.id
 
