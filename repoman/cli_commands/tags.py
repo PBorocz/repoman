@@ -1,6 +1,7 @@
 from rich.console import Console
 from rich.table import Table
 
+import constants as c
 import db_operations as dbo
 
 

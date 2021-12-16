@@ -1,8 +1,9 @@
+from pathlib import Path
+
 from prompt_toolkit import prompt
 from prompt_toolkit.completion import PathCompleter
 from prompt_toolkit.validation import Validator, ValidationError
 from rich.console import Console
-
 from rich.table import Table
 
 import constants as c
