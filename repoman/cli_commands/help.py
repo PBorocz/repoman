@@ -28,7 +28,7 @@ def command(console: Console, verbose: bool):
                 if command == '__name__':
                     command = module.__name__.replace("cli_commands", "")
             if "description:" in line.strip():
-                description += line.split(":")[1]
+                description += line.split(":")[1].strip()
         return (command, description)
 
     commands = []
@@ -41,17 +41,10 @@ def command(console: Console, verbose: bool):
 
     console.print("All entries that don't start with '.' are consider queries.\n")
 
-    console.print("Entries start with '!' are Document commands:")
-    table = Table(box=c.DEFAULT_BOX_STYLE)
-    table.add_column("Command")
-    table.add_column("Description")
-    table.add_row("!<i>", "Open the file associated with the number from the last query.")
-    console.print(table)
+    console.print("Entries start with '.' are [italic]repoman[/] commands:")
+    left_column_width = max([len(command) for command, _ in commands]) + 1
+    for (command, description) in sorted(commands):
+        console.print(f"[bold]{command:{left_column_width}s}[/] {description}")
 
-    console.print("\nEntries start with '.' are RepoMan commands:")
-    table = Table(box=c.DEFAULT_BOX_STYLE)
-    table.add_column("Command")
-    table.add_column("Description")
-    for command in sorted(commands):
-        table.add_row(*command)
-    console.print(table)
+    console.print("\nEntries start with '!' are [italic]document[/] commands:")
+    console.print(f"[bold]{'!<i>':{left_column_width}s}[/] Open the file associated with the number from the last query.\n")

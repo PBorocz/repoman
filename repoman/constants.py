@@ -1,4 +1,5 @@
 # Constants
+from enum import Enum
 from pathlib import Path
 from rich import box
 
@@ -14,20 +15,41 @@ if not REPOMAN_PATH.exists():
 DB_PATH = REPOMAN_PATH / Path(REPOMAN_DB)
 DB_DATETIME_FORMAT = '%Y-%m-%d %H:%M'
 
+################################################################################
 # State management of cli command history.
+################################################################################
+class SortOrderChoices(Enum):
+    # <display value> = <query result anonymous obj attribute>
+    lastmod = "last_mod"
+    name    = "name"
+    path    = "path_full"
+    rank    = "rank"
+    suffix  = "suffix"
+
+SORT_ORDER_CHOICES = ', '.join([enum for enum in SortOrderChoices.__members__])
+
 DEFAULTS = {
     "index" : {
         "dir"    : str(Path.home()),
         "suffix" : "txt",
         "force"  : "No",
     },
+    "query" : {
+        "query_string" : "",
+        "sort_order"   : "lastmod", # See above Enum for valid options
+        "top_n"        : "",
+        "suffix"       : "",
+    },
 
 }
 
-def italic(str_):
+# CLI UI support constants
+def _italic(str_):
     return f"[italic]{str_}[/italic]"
+
 INTRODUCTION = f"""Welcome to RepoMan!
-{italic('Ctrl-D')}, {italic('.exit')} or {italic('.q')} to exit.
-{italic('.help')} for help.
+{_italic('Ctrl-D')}, {_italic('.exit')}/{_italic('.quit')} to exit.
+{_italic('.help')} for help.
 """
+
 PROMPT = 'repoman> '

@@ -96,7 +96,6 @@ def test():
         DocumentTag.tag : "aTag",
     }).execute()
 
-    from pprint import pprint as pp
     res = (DocumentFTS
            .search_bm25(
                "org OR foobar",
@@ -109,7 +108,6 @@ def test():
                DocumentFTS.body.highlight('>>>', '<<<').alias('snippet'))
            .order_by(DocumentFTS.bm25().desc())
     )
-    pp(list(res)[0].__dict__)
 
 if __name__ == '__main__':
     test()

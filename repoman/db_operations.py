@@ -9,7 +9,6 @@ from urllib.parse import urlparse
 
 from pdfminer.pdfparser import PDFSyntaxError
 from peewee import fn
-from rich import print
 
 import constants as c
 from db_logical import Document, DocumentTag, DocumentLink, DocumentFTS

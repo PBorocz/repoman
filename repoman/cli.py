@@ -10,10 +10,8 @@ from prompt_toolkit.completion import PathCompleter
 from prompt_toolkit.history import FileHistory
 from pyfiglet import Figlet
 from rich.console import Console
-from rich.table import Table
 
 import constants as c
-import db_operations as dbo
 import db_physical as dbp
 from utils import get_user_history_path
 
@@ -42,7 +40,7 @@ def cli(verbose: bool) -> None:
             console.print("[italic]Goodbye![/]")
             break
 
-        if response.lower() in (".exit", ".q"):  # Done?
+        if response.lower() in (".exit",".quit"):  # Done?
             console.print("[italic]Goodbye![/]")
             break
 
@@ -55,23 +53,24 @@ def execute(verbose: bool, response: str) -> bool:
     """Execute the "response" provided, determining whether or not
     it's a "command" or "simply" a query to be executed."""
     console = Console()      # Every command is going to put out to the console.
+    global LAST_QUERY_RESULT
 
-    if response.startswith('.'):
-        #############################
-        # A *RepoMan* command
-        #############################
+    if response.startswith('.') and response.lower() != '.q':
+        ##########################################################
+        # A non-query repoman command
+        ##########################################################
         command = response[1:]
-        command_module = get_module_for_command(command)
-        if command_module:
+        command_method = get_command_module(command).command
+        if command_method:
             console.clear() # We're good, execute it!
-            command_module.command(console, verbose)
+            result = command_method(console, verbose=verbose)
         else:
             console.print(f"Sorry, [red bold]{response}[/red bold] is not a known command (.help to list them)")
 
     elif response.startswith("!"):
-        #############################
-        # A Document command
-        #############################
+        ##########################################################
+        # A document command
+        ##########################################################
         try:
             selected_file = int(response[1:])
         except ValueError:
@@ -90,12 +89,12 @@ def execute(verbose: bool, response: str) -> bool:
         home_dir = os.system(f'open "{path_full}"')
 
     else:
-        #############################
-        # A query!
-        #############################
-        console.clear()
-        command_module = get_module_for_command('query')
-        command_module.command(console, response)
+        ##########################################################
+        # A query (either short or "advanced"
+        ##########################################################
+        command_method = get_command_module('query').command
+        query_string = None if response.lower() == '.q' else response
+        LAST_QUERY_RESULT = command_method(console, query_string=query_string)
 
     return True
 
@@ -110,15 +109,19 @@ def populate_command_modules_cache() -> None:
     for path_ in commands_path.glob("*.py"):
         if not path_.stem.startswith('__'):  # Skip "__init__.py"
             COMMAND_MODULES[path_.stem] = import_module(f"cli_commands.{path_.stem}")
+
+    # Special case for query, we add it twice..once as 'query' and again as 'q'
+    COMMAND_MODULES['q'] = COMMAND_MODULES['query']
+
 populate_command_modules_cache()
+
+
+def get_command_module(command: str) -> ModuleType:
+    return COMMAND_MODULES.get(command, None)
 
 
 def get_command_modules() -> dict[str, ModuleType]:
     return COMMAND_MODULES
-
-
-def get_module_for_command(command: str) -> ModuleType:
-    return COMMAND_MODULES.get(command, None)
 
 
 if __name__ == "__main__":
