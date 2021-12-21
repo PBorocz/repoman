@@ -1,3 +1,6 @@
+# We might keep supplemental design documents, don't need to save
+*.pdf
+
 # We build this to be able to do a pip-audit but don't want to keep it:
 requirements.txt
 
