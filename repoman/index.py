@@ -6,6 +6,7 @@ import re
 import sys
 import time
 from collections import defaultdict
+from contextlib import suppress
 from copy import copy
 from pathlib import Path
 from typing import Iterable, Optional
@@ -44,6 +45,7 @@ INCLUDE_EXTENSIONS = (
     ".mp4", ".mov",
     ".jpg", ".jepg", ".jpg_large",
     ".png",
+    ".py",
 )
 
 FILENAME_TAG_SEPARATOR = " -- "
@@ -63,6 +65,7 @@ def index(index_command: AnonymousObj, verbose: bool) -> tuple[int, float]:
         Path(index_command.root).expanduser().resolve(),
         index_command.suffix,
         b_force)
+
 
     # Set up our processing pool based on:
     # 1 - the number of documents to index and
@@ -141,9 +144,9 @@ def _index(path_) -> Optional[int]:
     # For specific extensions that we *can* get meaningful text from,
     # find the specific method to do so and get it!
     get_text_method = dict(
+        txt = get_text_from_txt,
         py  = get_text_from_txt, # For now, treat Python as simple text..
         md  = get_text_from_txt, # For now, treat Markdown as simple text..
-        txt = get_text_from_txt,
         org = get_text_from_org,
         pdf = get_text_from_pdf,
     ).get(so_doc.suffix)
@@ -210,7 +213,7 @@ def get_text_from_pdf(path_, suffix="pdf") -> tuple[str, Optional[list[str]]]:
     try:
         return extract_text(path_), None
     except Exception as err:
-        print(f"\nSorry, {path_} may be a invalid PDF")
+        print(f"\nSorry, {path_} may be a invalid PDF ({err})")
         return None, None
 
 
@@ -306,10 +309,8 @@ def get_org_links(path_: Path, line: str) -> list[str]:
 
         return_.append((url, desc))
 
-        try:
+        with suppress(ValueError):
             _, line = line.split(']]', 1)  # Any more on the line?
-        except ValueError as err:
-            ...
 
     return return_
 

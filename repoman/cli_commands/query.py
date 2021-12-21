@@ -1,4 +1,5 @@
-from prompt_toolkit import prompt
+from functools import partial
+
 from prompt_toolkit.validation import Validator, ValidationError
 from rich.console import Console
 from rich.markup import escape
@@ -8,7 +9,7 @@ from typing import Optional, Tuple
 import constants as c
 import db_operations as dbo
 from cli_state import get_state, save_state
-from utils import AnonymousObj
+from utils import AnonymousObj, sub_prompt
 
 
 def command(
@@ -45,33 +46,6 @@ def command(
     console.print(f"Sorry, nothing matched: [italic]'{query_parms.query_string}'[/italic]\n")
     return None
 
-def get_query_parms(console: Console, query_parms: AnonymousObj) -> AnonymousObj:
-    """Advanced query, gather query string and allow for other options
-    to be selected as well (e.g. sort order, columns etc.)
-    """
-    def sub_prompt(prompt_: str, default_: str, *args, **kwargs) -> str:
-        return prompt(f"{prompt_:14s} > ", default=default_, *args, **kwargs)
-
-    query_parms.query_string = sub_prompt(  # What query string?
-        'Query',
-        getattr(query_parms, 'query_string', c.DEFAULTS["query"]["query_string"]))
-
-    query_parms.suffix = sub_prompt(  # Limit to a particular suffix?
-        'File Suffix',
-        getattr(query_parms, "suffix", c.DEFAULTS["query"]["suffix"]))
-
-    query_parms.sort_order = sub_prompt(  # What order to return results?
-        'Sort Order',
-        getattr(query_parms, "sort_order", c.DEFAULTS["query"]["sort_order"]),
-        validator=SortOrderValidator())
-
-    query_parms.top_n = sub_prompt(  # Top "n" results?
-        'Top N Results',
-        getattr(query_parms, "top_n", c.DEFAULTS["query"]["top_n"]),
-        validator=IntValidator())
-
-    return query_parms
-
 
 class SortOrderValidator(Validator):
     def validate(self, document):
@@ -88,6 +62,33 @@ class IntValidator(Validator):
                 int(document.text)
         except ValueError:
             raise ValidationError(message=f"Sorry, Top-N must be an integer or empty")
+
+
+def get_query_parms(console: Console, query_parms: AnonymousObj) -> AnonymousObj:
+    """Advanced query, gather query string and allow for other options
+    to be selected as well (e.g. sort order, columns etc.)
+    """
+    _sub_prompt = partial(sub_prompt, length=13)
+
+    query_parms.query_string = _sub_prompt(  # What query string?
+        'Query',
+        getattr(query_parms, 'query_string', c.DEFAULTS["query"]["query_string"]))
+
+    query_parms.suffix = _sub_prompt(  # Limit to a particular suffix?
+        'File Suffix',
+        getattr(query_parms, "suffix", c.DEFAULTS["query"]["suffix"]))
+
+    query_parms.sort_order = _sub_prompt(  # What order to return results?
+        'Sort Order',
+        getattr(query_parms, "sort_order", c.DEFAULTS["query"]["sort_order"]),
+        validator=SortOrderValidator())
+
+    query_parms.top_n = _sub_prompt(  # Top "n" results?
+        'Top N Results',
+        getattr(query_parms, "top_n", c.DEFAULTS["query"]["top_n"]),
+        validator=IntValidator())
+
+    return query_parms
 
 def _sort_filter_results(query_parms: AnonymousObj, results: list[AnonymousObj]) -> tuple[list[AnonymousObj], bool]:
 

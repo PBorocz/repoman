@@ -4,12 +4,22 @@ from pathlib import Path
 from functools import wraps
 from typing import Callable
 
+from prompt_toolkit import prompt
+
 
 def get_user_history_path():
     history_path = Path("~/.config/repoman/.cli_history").expanduser()
     if not history_path.exists() or not history_path.is_file():
         open(history_path, "a").close()
     return history_path
+
+
+def sub_prompt(prompt_: str, default_: str, *args, **kwargs) -> str:
+    len_ = 14
+    if 'length' in kwargs:
+        len_ = kwargs.get('length', 14)
+        del kwargs['length']
+    return prompt(f"{prompt_:{len_}s} > ", default=default_, *args, **kwargs)
 
 
 class AnonymousObj:
