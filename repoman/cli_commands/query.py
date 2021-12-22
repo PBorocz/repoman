@@ -10,6 +10,7 @@ import constants as c
 import db_operations as dbo
 from cli_state import get_state, save_state
 from utils import AnonymousObj, sub_prompt
+from adts import QueryCommandParameters, SortOrderChoices, SORT_ORDER_CHOICES
 
 
 def command(
@@ -22,22 +23,25 @@ def command(
     command: .q/.query
     description: Execute a text-search query with all options available.
     """
-    # Get the state (if any) of the last time we did this..
-    query_parms = get_state("query")
 
     # What type of ui are we executing?
     if not query_string:
         # Advanced query execution (prompt for query parameters...)
+
+        # Get the state (if any) of the last time we did this..
+        query_parms = get_state("query")
+
+        # Ask user for any changes to these parameters..
         query_parms = get_query_parms(console, query_parms)
+
+        # Save away these values for the next time we run this command.
+        save_state("query", query_parms)
     else:
         # Direct query execution (we've been given what to search for)
-        query_parms.query_string = query_string
-
-    # Save away these values for the next time we run this command.
-    save_state("query", query_parms)
+        query_parms = QueryCommandParameters(query_string=query_string)
 
     # DO our query based on the specified query parameters available!
-    if query_results := dbo.query(query_parms.query_string):
+    if query_results := dbo.query(query_parms):
         console.clear()
         query_results, more = _sort_filter_results(query_parms, query_results)
         _display_query_results(console, query_results, more)
@@ -50,9 +54,9 @@ def command(
 class SortOrderValidator(Validator):
     def validate(self, document):
         try:
-            c.SortOrderChoices[document.text.lower().replace("-", "")]
+            SortOrderChoices[document.text.lower().replace("-", "")]
         except KeyError:
-            raise ValidationError(message=f"Sorry, only valid sort order entries are: {c.SORT_ORDER_CHOICES}")
+            raise ValidationError(message=f"Sorry, only valid sort order entries are: {SORT_ORDER_CHOICES}")
 
 
 class IntValidator(Validator):
@@ -64,7 +68,7 @@ class IntValidator(Validator):
             raise ValidationError(message=f"Sorry, Top-N must be an integer or empty")
 
 
-def get_query_parms(console: Console, query_parms: AnonymousObj) -> AnonymousObj:
+def get_query_parms(console: Console, query_parms: QueryCommandParameters) -> QueryCommandParameters:
     """Advanced query, gather query string and allow for other options
     to be selected as well (e.g. sort order, columns etc.)
     """
@@ -72,34 +76,35 @@ def get_query_parms(console: Console, query_parms: AnonymousObj) -> AnonymousObj
 
     query_parms.query_string = _sub_prompt(  # What query string?
         'Query',
-        getattr(query_parms, 'query_string', c.DEFAULTS["query"]["query_string"]))
+        getattr(query_parms, 'query_string', query_parms.query_string))
 
     query_parms.suffix = _sub_prompt(  # Limit to a particular suffix?
         'File Suffix',
-        getattr(query_parms, "suffix", c.DEFAULTS["query"]["suffix"]))
+        getattr(query_parms, "suffix", query_parms.suffix))
 
     query_parms.sort_order = _sub_prompt(  # What order to return results?
         'Sort Order',
-        getattr(query_parms, "sort_order", c.DEFAULTS["query"]["sort_order"]),
+        getattr(query_parms, "sort_order", query_parms.sort_order),
         validator=SortOrderValidator())
 
     query_parms.top_n = _sub_prompt(  # Top "n" results?
         'Top N Results',
-        getattr(query_parms, "top_n", c.DEFAULTS["query"]["top_n"]),
+        getattr(query_parms, "top_n", query_parms.top_n),
         validator=IntValidator())
 
     return query_parms
 
-def _sort_filter_results(query_parms: AnonymousObj, results: list[AnonymousObj]) -> tuple[list[AnonymousObj], bool]:
 
-    def filter_results_by_suffix(query_parms: AnonymousObj, results: list[AnonymousObj]) -> list[AnonymousObj]:
+def _sort_filter_results(query_parms: QueryCommandParameters, results: list[AnonymousObj]) -> tuple[list[AnonymousObj], bool]:
+
+    def filter_results_by_suffix(query_parms: QueryCommandParameters, results: list[AnonymousObj]) -> list[AnonymousObj]:
         if query_parms.suffix:
             results = list(filter(
                 lambda doc: doc.suffix.lower() == query_parms.suffix.lower(),
                 results))
         return results
 
-    def top_n_results(query_parms: AnonymousObj, results: list[AnonymousObj]) -> tuple[list[AnonymousObj], int]:
+    def top_n_results(query_parms: QueryCommandParameters, results: list[AnonymousObj]) -> tuple[list[AnonymousObj], int]:
         more = None
         if query_parms.top_n:
             top_n = int(query_parms.top_n)
@@ -108,7 +113,7 @@ def _sort_filter_results(query_parms: AnonymousObj, results: list[AnonymousObj])
             results = results[0:top_n]
         return results, more
 
-    def sort_results(query_parms: AnonymousObj, results: list[AnonymousObj]) -> list[AnonymousObj]:
+    def sort_results(query_parms: QueryCommandParameters, results: list[AnonymousObj]) -> list[AnonymousObj]:
         """Return a set of results but sorted based on the respective
         attribute from the query_parms.
         """
@@ -116,7 +121,7 @@ def _sort_filter_results(query_parms: AnonymousObj, results: list[AnonymousObj])
         reverse = True if query_parms.sort_order.startswith("-") else False
 
         # By what attribute?
-        order_by_attribute = c.SortOrderChoices[query_parms.sort_order.replace("-", "")].value
+        order_by_attribute = SortOrderChoices[query_parms.sort_order.replace("-", "")].value
 
         # Do it..
         results.sort(
@@ -144,6 +149,7 @@ def _display_query_results(console, results: list[AnonymousObj], more: bool) -> 
 
     table = Table(show_header=True, header_style="bold", box=c.DEFAULT_BOX_STYLE)
     table.add_column("#")
+    table.add_column("Path")
     table.add_column("File")
     table.add_column("Snippet")
     table.add_column("LastMod")
@@ -151,7 +157,7 @@ def _display_query_results(console, results: list[AnonymousObj], more: bool) -> 
     for ith, obj in enumerate(results, 1):
         table.add_row(
             f"{ith:,d}",
-            obj.path_full.name,
+            str(obj.path_full), # .name,
             markup_snippet(obj.snippet),
             obj.last_mod.split(' ')[0],  # Don't need time..
         )

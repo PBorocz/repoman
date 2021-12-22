@@ -56,7 +56,7 @@ YYYY_MM_DD_PATTERN     = re.compile(r'^(\d{4,4})-([01]\d)-([0123]\d)[- _T]')
 ################################################################################
 # CORE METHOD: Get an iterator of files to be indexed and return the number that worked.
 ################################################################################
-def index(index_command: AnonymousObj, verbose: bool) -> tuple[int, float]:
+def index(index_command: IndexCommandParameters, verbose: bool) -> tuple[int, float]:
 
     b_force = False if not index_command.force or not index_command.force.lower().startswith('y') else True
 

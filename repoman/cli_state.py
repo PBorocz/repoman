@@ -4,12 +4,20 @@ import nestedtext as nt
 
 import constants as c
 from utils import AnonymousObj
+from adts import *
 
+STATE_TYPES = dict(
+    index = IndexCommandParameters,
+    query = QueryCommandParameters,
+)
 
 def get_state(command: str) -> AnonymousObj:
+    type_ = STATE_TYPES[command]
     path_ = get_state_path(command)
-    state = nt.load(path_, top='dict') if path_.exists() else c.DEFAULTS[command]
-    return AnonymousObj(**state)
+    if path_.exists:
+        state = nt.load(path_, top='dict')
+        return type_(**state)
+    return type_()        # Pick up default values from ADT definition
 
 
 def save_state(command: str, state: AnonymousObj) -> bool:

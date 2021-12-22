@@ -14,37 +14,47 @@ import constants as c
 from db_logical import Document, DocumentTag, DocumentLink, DocumentFTS
 from db_physical import database
 from utils import AnonymousObj, retry
+from adts import QueryResult, QueryCommandParameters
 
 ################################################################################
 # Core database operations
 ################################################################################
-def query(query_string: str):
+def query(query_parms: QueryCommandParameters) -> list[QueryResult]:
 
-    def get_docs_from_fts(query_string:str) -> List[AnonymousObj]:
-        fts = (DocumentFTS
-               .search_bm25(query_string)
-               .select(
-                   DocumentFTS,
-                   DocumentFTS.bm25().alias('bm25'),
-                   DocumentFTS.body.snippet('>>>', '<<<', max_tokens=5).alias('snippet'))
-               .order_by(DocumentFTS.bm25().desc())
-               )
-        doc_ids = [doc.rowid for doc in fts]
+    def _get_docs_by_id(query_parms: QueryCommandParameters, doc_ids: list[int]) -> dict[int, Document]:
+        docs = (Document
+                .select()
+                .where(Document.id.in_(doc_ids)))
+        return {doc.id : doc for doc in docs}
+
+
+    def get_docs_from_fts(query_parms: QueryCommandParameters) -> list[QueryResult]:
+
+        ftss = (DocumentFTS
+                .search_bm25(query_parms.query_string)
+                .select(
+                    DocumentFTS,
+                    DocumentFTS.bm25().alias('bm25'),
+                    DocumentFTS.body.snippet('>>>', '<<<', max_tokens=5).alias('snippet'))
+                .order_by(DocumentFTS.bm25().desc())
+                )
+        doc_ids = [doc.rowid for doc in ftss]
 
         # Now, get the matching document definitions..
-        docs = Document.select().where(Document.id.in_(doc_ids))
-        doc_objs = {doc.id : doc for doc in docs}
+        docs = _get_docs_by_id(query_parms, doc_ids)
 
         # And laminate them both together..
         return_ = list()
-        for fts in fts:
-            doc = doc_objs.get(fts.rowid)
+        for fts in ftss:
+            doc = docs.get(fts.rowid)
+            if not doc:
+                continue
             doc_path = Path(doc.path)
-            ao_doc = AnonymousObj(
+            ao_doc = QueryResult(
                 doc_id    = doc.id,
                 rank      = f"{fts.bm25:.2f}",
-                name      = doc_path.name,
                 path_full = doc_path,
+                name      = doc_path.name,
                 path_rel  = str(doc_path.relative_to(*doc_path.parts[:3])), # FIXME! Won't always be 3!!
                 suffix    = doc.suffix,
                 last_mod  = doc.last_mod,
@@ -54,36 +64,39 @@ def query(query_string: str):
 
         return return_, doc_ids
 
-    def get_docs_from_tags(doc_ids: list[int], tag: str) -> List[AnonymousObj]:
-        query = DocumentTag.select(DocumentTag.doc_id).where(DocumentTag.tag == tag)
+    def get_docs_from_tags(doc_ids: list[int], query_parms: QueryCommandParameters) -> List[QueryResult]:
+
+        query = DocumentTag.select(DocumentTag.doc_id).where(DocumentTag.tag == query_parms.query_string)
         if not query:
             return []
 
-        # Depup against what we've already queried.
+        # Fast depup against what we've already queried from regular FTS search..
         tag_doc_ids = {dt_.doc_id for dt_ in query if dt_.doc_id not in doc_ids}
 
-        docs = Document.select().where(Document.id.in_(tag_doc_ids))
+        # Now, get the matching document definitions..
+        docs = _get_docs_by_id(query_parms, tag_doc_ids)
 
         return_ = list()
-        for doc in docs:
+        for doc in docs.values():
             doc_path = Path(doc.path)
-            ao_doc = AnonymousObj(
+            ao_doc = QueryResult(
+                doc_id    = None,
                 rank      = f" 0.00",
-                name      = doc_path.name,
                 path_full = doc_path,
+                name      = doc_path.name,
                 path_rel  = str(doc_path.relative_to(*doc_path.parts[:3])),
                 suffix    = doc.suffix,
                 last_mod  = doc.last_mod,
-                snippet   = f"Tag: >>>{tag}<<<",
+                snippet   = f"Tag: >>>{query_parms.query_string}<<<",
             )
             return_.append(ao_doc)
         return return_
 
     ################################################################################
-    # Main: Query docs based on content *and* tag match:
+    # MAIN: Query docs based on content *and* tag match:
     ################################################################################
-    docs_from_fts, doc_ids = get_docs_from_fts (query_string)
-    docs_from_tags         = get_docs_from_tags(doc_ids, query_string)
+    docs_from_fts, doc_ids = get_docs_from_fts (query_parms)
+    docs_from_tags         = get_docs_from_tags(doc_ids, query_parms)
 
     return docs_from_tags + docs_from_fts
 
