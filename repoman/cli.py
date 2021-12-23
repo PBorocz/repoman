@@ -13,6 +13,7 @@ from rich.console import Console
 
 import constants as c
 import db_physical as dbp
+import db_operations as dbo
 from utils import get_user_history_path
 
 LAST_QUERY_RESULT = None
@@ -29,6 +30,11 @@ def cli(verbose: bool) -> None:
     console.clear()
     print(Figlet(font='standard').renderText('Repo-Man'))
     console.print(c.INTRODUCTION)
+
+    with dbp.database.connection_context() as ctx:
+        status = dbo.status()
+        if status.total_docs:
+            console.print(f"[bold italic]{status.total_docs:,d}[/bold italic] documents to query from.")
 
     # Prompt session allow commands over sessions (!)
     session = PromptSession(history=FileHistory(get_user_history_path()))

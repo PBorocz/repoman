@@ -133,7 +133,6 @@ def _display_query_results(console, results: list[AnonymousObj], more: bool) -> 
     table = Table(show_header=True, header_style="bold", box=c.DEFAULT_BOX_STYLE)
     table.add_column("#")
     table.add_column("Path")
-    table.add_column("File")
     table.add_column("Snippet")
     table.add_column("LastMod")
 
