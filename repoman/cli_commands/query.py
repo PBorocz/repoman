@@ -1,6 +1,5 @@
 from functools import partial
 
-from prompt_toolkit.validation import Validator, ValidationError
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
@@ -8,9 +7,9 @@ from typing import Optional, Tuple
 
 import constants as c
 import db_operations as dbo
-from cli_state import get_state, save_state
+from cli_utils import get_state, save_state, update_state, SortOrderValidator, IntValidator
 from utils import AnonymousObj, sub_prompt
-from adts import QueryCommandParameters, SortOrderChoices, SORT_ORDER_CHOICES
+from adts import QueryCommandParameters, SortOrderChoices
 
 
 def command(
@@ -39,6 +38,7 @@ def command(
     else:
         # Direct query execution (we've been given what to search for)
         query_parms = QueryCommandParameters(query_string=query_string)
+        update_state("query", "query_string", query_string)
 
     # DO our query based on the specified query parameters available!
     if query_results := dbo.query(query_parms):
@@ -49,23 +49,6 @@ def command(
 
     console.print(f"Sorry, nothing matched: [italic]'{query_parms.query_string}'[/italic]\n")
     return None
-
-
-class SortOrderValidator(Validator):
-    def validate(self, document):
-        try:
-            SortOrderChoices[document.text.lower().replace("-", "")]
-        except KeyError:
-            raise ValidationError(message=f"Sorry, only valid sort order entries are: {SORT_ORDER_CHOICES}")
-
-
-class IntValidator(Validator):
-    def validate(self, document):
-        try:
-            if document.text:   # We allow empty here...
-                int(document.text)
-        except ValueError:
-            raise ValidationError(message=f"Sorry, Top-N must be an integer or empty")
 
 
 def get_query_parms(console: Console, query_parms: QueryCommandParameters) -> QueryCommandParameters:

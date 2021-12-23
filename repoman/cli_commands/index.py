@@ -3,23 +3,13 @@ from pathlib import Path
 
 from prompt_toolkit import prompt
 from prompt_toolkit.completion import PathCompleter
-from prompt_toolkit.validation import Validator, ValidationError
 from rich.console import Console
 from rich.table import Table
 
 import constants as c
-from cli_state import get_state, save_state
+from cli_utils import get_state, save_state, YesNoValidator, PathValidator
 from index import index
 from utils import get_user_history_path, sub_prompt
-
-
-class PathValidator(Validator):
-    def validate(self, document):
-        path = Path(document.text)
-        if not path.exists():
-            raise ValidationError(message="Sorry, this path doesn't exist")
-        if not path.is_dir():
-            raise ValidationError(message="Sorry, this path isn't a directory")
 
 
 def command(console: Console, verbose: bool) -> bool:
@@ -27,34 +17,45 @@ def command(console: Console, verbose: bool) -> bool:
     command: __name__
     description: Index a set of files (by root directory and/or suffix)
     """
-    _sub_prompt = partial(sub_prompt, length=11)
+    _sub_prompt = partial(sub_prompt, length=13)
 
     # Get the values we last used for this command..
-    index_command = get_state("index")
+    index_parms = get_state("index")
 
     ############################################################
     # Using these as defaults, prompt for any updated values
     ############################################################
     # Root directory to index from..
-    index_command.root = _sub_prompt(
+    index_parms.root = _sub_prompt(
         'Root',
-        index_command.root,
+        index_parms.root,
         completer=PathCompleter(only_directories=True),
         validator=PathValidator())
 
     # What file suffix to index (if any)
-    index_command.suffix = _sub_prompt('Suffix', index_command.suffix)
+    index_parms.suffix = _sub_prompt(
+        'Suffix',
+        index_parms.suffix)
 
     # Should we overwrite existing entries?
-    index_command.force  = _sub_prompt('Force [y/n]', index_command.force)
+    index_parms.force = _sub_prompt(
+        'Force [y/n]',
+        index_parms.force,
+        validator=YesNoValidator())
+
+    # Should we overwrite existing entries?
+    index_parms.verbose = _sub_prompt(
+        'Verbose [y/n]',
+        index_parms.verbose,
+        validator=YesNoValidator())
 
     # Save away these values for the next time we run this command.
-    save_state("index", index_command)
+    save_state("index", index_parms)
 
     ############################################################
     # DO IT!
     ############################################################
-    num_indexed, num_cleansed, time_taken = index(index_command, True)
+    num_indexed, num_cleansed, time_taken = index(index_parms)
 
     # Print a nice summary of what we did (based on what occurred)
     table = Table(show_header=False, box=c.DEFAULT_BOX_STYLE)

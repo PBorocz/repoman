@@ -2,8 +2,8 @@
 import sys
 from collections import defaultdict
 from pathlib import Path
-from sqlite3 import Connection  # typing...
-from sqlite3 import connect, OperationalError
+from peewee import OperationalError
+from sqlite3 import connect, Connection  # typing...
 from typing import List, Dict, Tuple
 from urllib.parse import urlparse
 
@@ -104,7 +104,7 @@ def query(query_parms: QueryCommandParameters) -> list[QueryResult]:
 ################################################################################
 # Core method to "index" a new document.
 ################################################################################
-def upsert_doc(a_doc: AnonymousObj) -> int:
+def upsert_doc(verbose: bool, a_doc: AnonymousObj) -> int:
 
     # Clean out any existing row!
     check_delete_existing(a_doc.path_)

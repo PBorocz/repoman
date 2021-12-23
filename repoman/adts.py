@@ -29,7 +29,8 @@ class IndexCommandParameters:
     """Keep track of index command parameters"""
     root   : str(Path.home())
     suffix : str
-    force  : str = "No"
+    force  : str = "no"
+    verbose: str = "no"
 
 
 @dataclass

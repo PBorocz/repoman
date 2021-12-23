@@ -8,6 +8,7 @@ import time
 from collections import defaultdict
 from contextlib import suppress
 from copy import copy
+from functools import partial
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -22,7 +23,7 @@ import db_logical as dbl
 import db_physical as dbp
 import db_operations as dbo
 from utils import AnonymousObj, progressIndicator, timer
-
+from adts import IndexCommandParameters
 
 SKIP_DIRS = (
     ".git",
@@ -56,16 +57,15 @@ YYYY_MM_DD_PATTERN     = re.compile(r'^(\d{4,4})-([01]\d)-([0123]\d)[- _T]')
 ################################################################################
 # CORE METHOD: Get an iterator of files to be indexed and return the number that worked.
 ################################################################################
-def index(index_command: IndexCommandParameters, verbose: bool) -> tuple[int, float]:
+def index(index_parms: IndexCommandParameters) -> tuple[int, float]:
 
-    b_force = False if not index_command.force or not index_command.force.lower().startswith('y') else True
+    b_force   = False if not index_parms.force   or not index_parms.force.lower().startswith('y') else True
+    b_verbose = False if not index_parms.verbose or not index_parms.verbose.lower().startswith('y') else True
 
     paths_to_index = _paths_to_index(
-        verbose,
-        Path(index_command.root).expanduser().resolve(),
-        index_command.suffix,
+        Path(index_parms.root).expanduser().resolve(),
+        index_parms.suffix,
         b_force)
-
 
     # Set up our processing pool based on:
     # 1 - the number of documents to index and
@@ -75,7 +75,7 @@ def index(index_command: IndexCommandParameters, verbose: bool) -> tuple[int, fl
 
     # ..Let 'em loose!
     start = time.time()
-    pool_outputs = pool.map(_index, paths_to_index)
+    pool_outputs = pool.map(partial(_index, b_verbose), paths_to_index)
 
     # ..and wait for all to finish.
     pool.close()
@@ -88,7 +88,6 @@ def index(index_command: IndexCommandParameters, verbose: bool) -> tuple[int, fl
 
 
 def _paths_to_index(
-        verbose: bool,
         path_dir: Path,
         arg_suffix: Optional[str],
         arg_force: bool) -> Iterable[Path]:
@@ -129,8 +128,13 @@ def _paths_to_index(
 
     return return_
 
-def _index(path_) -> Optional[int]:
+def _index(verbose: bool, path_: Path) -> Optional[int]:
     """Index the file on the specified path on a thread-safe basis"""
+
+    if verbose:
+        print(f"[{os.getpid():6d}] {path_}...")
+        sys.stdout.flush()
+
     so_doc = AnonymousObj(
         path_  = path_,
         suffix = path_.suffix.lower()[1:],
@@ -158,10 +162,10 @@ def _index(path_) -> Optional[int]:
     so_doc.body, so_doc.links = get_text_method(path_)
 
     # ..and update/insert a new document entry into our database.
-    # (get a database connection *here* as we might be in a separate
-    # thread from the main index method)
+    # (get a database connection *here* as we might be in
+    #  a separate thread from the main index method)
     with dbp.database.connection_context() as ctx:
-        return dbo.upsert_doc(so_doc)
+        return dbo.upsert_doc(verbose, so_doc)
 
 
 def get_text_from_txt(path_, suffix="txt") -> tuple[str, Optional[list[str]]]:
