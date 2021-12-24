@@ -14,11 +14,9 @@ def command(console: Console, verbose: bool):
     command: __name__
     description: Display the list of all RepoMan commands available.
     """
-    # Display the list of all commands available by finding all the methods in this module that start with "command_" and using their doc-strings as the "help" text for their operation.
-    def check_func(name, func):
-        """Confirm that the function sent in represents a RepoMan command"""
-        return inspect.isfunction(func) and name.startswith('command_') and func.__module__ == __name__
-
+    # Display the list of all commands available by finding all the
+    # methods in this module that start with "command_" and using
+    # their doc-strings as the "help" text for their operation.
     def parse_docstring(module, docstring: str) -> tuple[str, str]:
         """Parse the docstring and get the command invocation and description"""
         command, description = "", ""
@@ -27,6 +25,7 @@ def command(console: Console, verbose: bool):
                 command += line.split(":")[1].strip()
                 if command == '__name__':
                     command = module.__name__.replace("cli_commands", "")
+
             if "description:" in line.strip():
                 description += line.split(":")[1].strip()
         return (command, description)

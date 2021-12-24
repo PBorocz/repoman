@@ -19,8 +19,6 @@ def _italic(str_):
     return f"[italic]{str_}[/italic]"
 
 INTRODUCTION = f"""Welcome to RepoMan!
-{_italic('Ctrl-D')}, {_italic('.exit')}/{_italic('.quit')} to exit.
-{_italic('.help')} for help.
-"""
+{_italic('Ctrl-D')} or {_italic('.exit')}/{_italic('.quit')} to exit, {_italic('.help')} for help."""
 
 PROMPT = 'repoman> '

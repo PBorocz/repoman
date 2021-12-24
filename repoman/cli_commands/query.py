@@ -190,7 +190,7 @@ def open_file(console: Console, doc_id: int) -> Optional[str]:
     console.print(f"   {'File':16s} {path_.name}")
     console.print(f"   {'Last Modified':16s} {doc.last_mod}")
     console.print(f"   {'Size':16s} {humanify_size(size_)}")
-    yes_no_other = Prompt.ask("Open this file [y/n]?")
+    yes_no_other = Prompt.ask("Open this file \[y/n]?")
 
     if yes_no_other and yes_no_other.lower().startswith("y"):
         os.system(f'open "{path_}"')

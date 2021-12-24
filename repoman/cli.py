@@ -40,7 +40,7 @@ def cli(verbose: bool, query: Optional[str]) -> None:
         with dbp.database.connection_context() as ctx:
             status = dbo.status()
             if status.total_docs:
-                console.print(f"[bold italic]{status.total_docs:,d}[/bold italic] documents to query from.")
+                console.print(f"[bold italic]{status.total_docs:,d}[/bold italic] documents to query from.\n")
 
     # Setup our prompt session allow commands over sessions (!)
     session = PromptSession(history=FileHistory(get_user_history_path()))
@@ -96,9 +96,6 @@ def populate_command_modules_cache() -> None:
     for path_ in commands_path.glob("*.py"):
         if not path_.stem.startswith('__'):  # Skip "__init__.py"
             COMMAND_MODULES[path_.stem] = import_module(f"cli_commands.{path_.stem}")
-
-    # Special case for query, we add it twice..once as 'query' and again as 'q'
-    COMMAND_MODULES['q'] = COMMAND_MODULES['query']
 
 populate_command_modules_cache()
 
