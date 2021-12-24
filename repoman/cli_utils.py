@@ -2,11 +2,24 @@ from pathlib import Path
 from typing import Any
 
 import nestedtext as nt
+from prompt_toolkit import prompt
 from prompt_toolkit.validation import Validator, ValidationError
 
 import constants as c
 from utils import AnonymousObj
 from adts import SortOrderChoices, IndexCommandParameters, QueryCommandParameters
+
+
+################################################################################
+# CLI Tools
+################################################################################
+def sub_prompt(prompt_: str, default_: str, *args, **kwargs) -> str:
+    len_ = 14
+    if 'length' in kwargs:
+        len_ = kwargs.get('length', 14)
+        del kwargs['length']
+    return prompt(f"{prompt_:{len_}s} > ", default=default_, *args, **kwargs)
+
 
 ################################################################################
 # CLI State Management

@@ -72,7 +72,6 @@ def execute(verbose: bool, console: Console, response: str) -> bool:
         command = response[1:]
         command_method = get_command_method(command)
         if command_method:
-            console.clear() # We're good, execute it!
             result = command_method(console, verbose=verbose)
         else:
             console.print(f"Sorry, [red bold]{response}[/red bold] is not a known command (.help to list them)")

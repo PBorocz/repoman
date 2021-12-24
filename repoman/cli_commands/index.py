@@ -7,9 +7,9 @@ from rich.console import Console
 from rich.table import Table
 
 import constants as c
-from cli_utils import get_state, save_state, YesNoValidator, PathValidator
+from cli_utils import get_state, save_state, YesNoValidator, PathValidator, sub_prompt
 from index import index
-from utils import get_user_history_path, sub_prompt
+from utils import get_user_history_path
 
 
 def command(console: Console, verbose: bool) -> bool:

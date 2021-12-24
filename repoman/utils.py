@@ -4,22 +4,12 @@ from pathlib import Path
 from functools import wraps
 from typing import Callable
 
-from prompt_toolkit import prompt
-
 
 def get_user_history_path():
     history_path = Path("~/.config/repoman/.cli_history").expanduser()
     if not history_path.exists() or not history_path.is_file():
         open(history_path, "a").close()
     return history_path
-
-
-def sub_prompt(prompt_: str, default_: str, *args, **kwargs) -> str:
-    len_ = 14
-    if 'length' in kwargs:
-        len_ = kwargs.get('length', 14)
-        del kwargs['length']
-    return prompt(f"{prompt_:{len_}s} > ", default=default_, *args, **kwargs)
 
 
 class AnonymousObj:
@@ -159,3 +149,13 @@ def retry(ExceptionToCheck, tries=5, delay=1, backoff=2, logger=None) -> Callabl
         return f_retry  # true decorator
 
     return deco_retry
+
+
+suffixes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+def humanify_size(nbytes):
+    i = 0
+    while nbytes >= 1024 and i < len(suffixes)-1:
+        nbytes /= 1024.
+        i += 1
+    str_ = ('%.2f' % nbytes).rstrip('0').rstrip('.')
+    return f'{str_} {suffixes[i]}'

@@ -19,7 +19,6 @@ SORT_ORDER_CHOICES = ', '.join([enum for enum in SortOrderChoices.__members__])
 class QueryCommandParameters:
     """Keep track of query parameters"""
     query_string : str
-    top_n        : int = None
     suffix       : str = ""
     sort_order   : str = "lastmod"
 

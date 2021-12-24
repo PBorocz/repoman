@@ -1,9 +1,10 @@
 import os
 from contextlib import suppress
 from functools import partial
+from pathlib import Path
 
 from prompt_toolkit import prompt
-from rich.console import Console
+from rich.console import Console # Typing
 from rich.markup import escape
 from rich.prompt import Prompt
 from rich.table import Table
@@ -11,9 +12,10 @@ from typing import Optional, Tuple
 
 import constants as c
 import db_operations as dbo
-from cli_utils import get_state, save_state, update_state, SortOrderValidator, IntValidator
-from utils import AnonymousObj, sub_prompt
-from adts import QueryCommandParameters, SortOrderChoices
+from db_logical import Document
+from cli_utils import get_state, save_state, update_state, SortOrderValidator, IntValidator, sub_prompt
+from utils import humanify_size
+from adts import QueryCommandParameters, SortOrderChoices, QueryResult
 
 
 LAST_QUERY_RESULTS = None
@@ -28,6 +30,7 @@ def command(
     command: .q/.query
     description: Execute a text-search query with all options available.
     """
+    global LAST_QUERY_RESULTS
 
     # What type of ui are we executing?
     if not query_string:
@@ -47,12 +50,13 @@ def command(
         update_state("query", "query_string", query_string)
 
     # DO our query based on the specified query parameters available!
-    global LAST_QUERY_RESULTS
-    if LAST_QUERY_RESULTS := dbo.query(query_parms):
-        query_results   = _sort_filter_results(query_parms, LAST_QUERY_RESULTS)
-        message_or_none = _display_query_results(console, LAST_QUERY_RESULTS)
+    if results := dbo.query(query_parms):
+        results = _sort_filter_results(query_parms, results)
+        message_or_none = _display_query_results(console, results)
+        LAST_QUERY_RESULTS = results
         return message_or_none
 
+    LAST_QUERY_RESULTS = None
     console.print(f"Sorry, nothing matched: [italic]'{query_parms.query_string}'[/italic]\n")
     return None
 
@@ -76,33 +80,19 @@ def get_query_parms(console: Console, query_parms: QueryCommandParameters) -> Qu
         getattr(query_parms, "sort_order", query_parms.sort_order),
         validator=SortOrderValidator())
 
-    query_parms.top_n = _sub_prompt(  # Top "n" results?
-        'Top N Results',
-        getattr(query_parms, "top_n", query_parms.top_n),
-        validator=IntValidator())
-
     return query_parms
 
 
-def _sort_filter_results(query_parms: QueryCommandParameters, results: list[AnonymousObj]) -> list[AnonymousObj]:
+def _sort_filter_results(query_parms: QueryCommandParameters, results: list[QueryResult]) -> list[QueryResult]:
 
-    def filter_results_by_suffix(query_parms: QueryCommandParameters, results: list[AnonymousObj]) -> list[AnonymousObj]:
+    def filter_results_by_suffix(query_parms: QueryCommandParameters, results: list[QueryResult]) -> list[QueryResult]:
         if query_parms.suffix:
             results = list(filter(
                 lambda doc: doc.suffix.lower() == query_parms.suffix.lower(),
                 results))
         return results
 
-    def top_n_results(query_parms: QueryCommandParameters, results: list[AnonymousObj]) -> list[AnonymousObj]:
-        more = None
-        if query_parms.top_n:
-            top_n = int(query_parms.top_n)
-            if len(results) > top_n:
-                more = len(results) - top_n
-            results = results[0:top_n]
-        return results
-
-    def sort_results(query_parms: QueryCommandParameters, results: list[AnonymousObj]) -> list[AnonymousObj]:
+    def sort_results(query_parms: QueryCommandParameters, results: list[QueryResult]) -> list[QueryResult]:
         """Return a set of results but sorted based on the respective
         attribute from the query_parms.
         """
@@ -120,12 +110,11 @@ def _sort_filter_results(query_parms: QueryCommandParameters, results: list[Anon
         return results
 
     results = filter_results_by_suffix(query_parms, results)
-    # results = top_n_results(query_parms, results)
     results = sort_results(query_parms, results)
     return results
 
 
-def _display_query_results(console, results: list[AnonymousObj]) -> Optional[str]:
+def _display_query_results(console: Console, results: list[QueryResult]) -> Optional[str]:
 
     def chunker(lst: list, n: int) -> list:
         """Yield successive n-sized chunks from lst."""
@@ -180,9 +169,30 @@ def _display_query_results(console, results: list[AnonymousObj]) -> Optional[str
 
         # If the response is an integer, open the respective document path
         try:
-            row = results[int(next_)-1]
-            os.system(f'open "{row.path_full}"')
-            return f"Opening file: [b]{row.path_full.name}"
-
+            return open_file(console, results[int(next_)-1].doc_id)
         except ValueError:
             continue
+
+def open_file(console: Console, doc_id: int) -> Optional[str]:
+
+    docs = Document.select().where(Document.id == doc_id).execute()
+    if not docs:
+        return None
+    doc = docs[0]
+
+    # Get information about the file...
+    path_ = Path(doc.path)
+    stat_ = os.stat(path_)
+    size_ = stat_.st_size
+
+    console.print(f"   {'Doc Id':16s} {doc.id}")
+    console.print(f"   {'Path':16s} {path_.parent}")
+    console.print(f"   {'File':16s} {path_.name}")
+    console.print(f"   {'Last Modified':16s} {doc.last_mod}")
+    console.print(f"   {'Size':16s} {humanify_size(size_)}")
+    yes_no_other = Prompt.ask("Open this file [y/n]?")
+
+    if yes_no_other and yes_no_other.lower().startswith("y"):
+        os.system(f'open "{path_}"')
+        return f"Opening file: [b]{path_full.name}..."
+    return None

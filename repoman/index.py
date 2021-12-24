@@ -14,7 +14,6 @@ from typing import Iterable, Optional
 
 from pdfminer.high_level import extract_text
 from pdfminer.pdftypes import PDFException
-
 from rich import print
 from rich.progress import track
 
