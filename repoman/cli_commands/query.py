@@ -1,7 +1,11 @@
+import os
+from contextlib import suppress
 from functools import partial
 
+from prompt_toolkit import prompt
 from rich.console import Console
 from rich.markup import escape
+from rich.prompt import Prompt
 from rich.table import Table
 from typing import Optional, Tuple
 
@@ -12,12 +16,14 @@ from utils import AnonymousObj, sub_prompt
 from adts import QueryCommandParameters, SortOrderChoices
 
 
+LAST_QUERY_RESULTS = None
+
 def command(
         console: Console,
         query_string: Optional[str] = None,
         response: Optional[str]=None,
         verbose: Optional[bool]=False,
-) -> AnonymousObj:
+) -> Optional[str]:
     """
     command: .q/.query
     description: Execute a text-search query with all options available.
@@ -41,11 +47,11 @@ def command(
         update_state("query", "query_string", query_string)
 
     # DO our query based on the specified query parameters available!
-    if query_results := dbo.query(query_parms):
-        console.clear()
-        query_results, more = _sort_filter_results(query_parms, query_results)
-        _display_query_results(console, query_results, more)
-        return query_results
+    global LAST_QUERY_RESULTS
+    if LAST_QUERY_RESULTS := dbo.query(query_parms):
+        query_results   = _sort_filter_results(query_parms, LAST_QUERY_RESULTS)
+        message_or_none = _display_query_results(console, LAST_QUERY_RESULTS)
+        return message_or_none
 
     console.print(f"Sorry, nothing matched: [italic]'{query_parms.query_string}'[/italic]\n")
     return None
@@ -78,7 +84,7 @@ def get_query_parms(console: Console, query_parms: QueryCommandParameters) -> Qu
     return query_parms
 
 
-def _sort_filter_results(query_parms: QueryCommandParameters, results: list[AnonymousObj]) -> tuple[list[AnonymousObj], bool]:
+def _sort_filter_results(query_parms: QueryCommandParameters, results: list[AnonymousObj]) -> list[AnonymousObj]:
 
     def filter_results_by_suffix(query_parms: QueryCommandParameters, results: list[AnonymousObj]) -> list[AnonymousObj]:
         if query_parms.suffix:
@@ -87,14 +93,14 @@ def _sort_filter_results(query_parms: QueryCommandParameters, results: list[Anon
                 results))
         return results
 
-    def top_n_results(query_parms: QueryCommandParameters, results: list[AnonymousObj]) -> tuple[list[AnonymousObj], int]:
+    def top_n_results(query_parms: QueryCommandParameters, results: list[AnonymousObj]) -> list[AnonymousObj]:
         more = None
         if query_parms.top_n:
             top_n = int(query_parms.top_n)
             if len(results) > top_n:
                 more = len(results) - top_n
             results = results[0:top_n]
-        return results, more
+        return results
 
     def sort_results(query_parms: QueryCommandParameters, results: list[AnonymousObj]) -> list[AnonymousObj]:
         """Return a set of results but sorted based on the respective
@@ -114,12 +120,17 @@ def _sort_filter_results(query_parms: QueryCommandParameters, results: list[Anon
         return results
 
     results = filter_results_by_suffix(query_parms, results)
-    results, more = top_n_results(query_parms, results)
+    # results = top_n_results(query_parms, results)
     results = sort_results(query_parms, results)
-    return results, more
+    return results
 
 
-def _display_query_results(console, results: list[AnonymousObj], more: bool) -> None:
+def _display_query_results(console, results: list[AnonymousObj]) -> Optional[str]:
+
+    def chunker(lst: list, n: int) -> list:
+        """Yield successive n-sized chunks from lst."""
+        for i in range(0, len(lst), n):
+            yield lst[i:i + n]
 
     def markup_snippet(snippet):
         """On our queries, we can't use the Rich markup to delineate matching text,
@@ -130,19 +141,48 @@ def _display_query_results(console, results: list[AnonymousObj], more: bool) -> 
         snippet = snippet.replace("<<<", "[/]")
         return snippet
 
-    table = Table(show_header=True, header_style="bold", box=c.DEFAULT_BOX_STYLE)
-    table.add_column("#")
-    table.add_column("Path")
-    table.add_column("Snippet")
-    table.add_column("LastMod")
+    ith = 0
 
-    for ith, obj in enumerate(results, 1):
-        table.add_row(
-            f"{ith:,d}",
-            str(obj.path_full), # .name,
-            markup_snippet(obj.snippet),
-            obj.last_mod.split(' ')[0],  # Don't need time..
-        )
-    console.print(table)
-    if more:
-        console.print(f"({more:,d} more)")
+    for page, chunk in enumerate(chunker(results, console.size.height-1)):
+        table = Table(show_header=True, header_style="bold", box=c.DEFAULT_BOX_STYLE)
+        table.add_column("#")
+        table.add_column("Name")
+        table.add_column("Snippet")
+        table.add_column("LastMod")
+        for obj in chunk:
+            table.add_row(
+                f"{ith+1:,d}",
+                obj.path_full.name,
+                markup_snippet(obj.snippet),
+                obj.last_mod.split(' ')[0],  # Don't need time..
+            )
+            ith += 1
+        console.clear()
+        console.print(table)
+
+        remaining = len(results) - ith
+        if remaining > 0:
+            prompt_ = f"[b]{remaining:,d}[/] left; [b]<ith>[/] doc to open; [i]<ret>[/] for next set; [b]q[/] to quit"
+        else:
+            prompt_ = "[b]<ith>[/] doc to open; [b]q[/] to quit"
+
+        try:
+            # Use Rich's prompt here to be able to take advantage of formatting
+            next_ = Prompt.ask(prompt_)
+        except (KeyboardInterrupt, EOFError):
+            return None         # Break out, we're done...
+
+        if not next_:
+            continue            # No response..keep paging through results
+
+        if next_.lower().startswith("q"):
+            return None
+
+        # If the response is an integer, open the respective document path
+        try:
+            row = results[int(next_)-1]
+            os.system(f'open "{row.path_full}"')
+            return f"Opening file: [b]{row.path_full.name}"
+
+        except ValueError:
+            continue

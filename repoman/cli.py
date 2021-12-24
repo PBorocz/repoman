@@ -1,8 +1,8 @@
 #!/usr/bin/env py
-import os
 from importlib import import_module
 from pathlib import Path
 from types import ModuleType
+from typing import Optional
 
 import click
 from prompt_toolkit import PromptSession, prompt
@@ -16,27 +16,33 @@ import db_physical as dbp
 import db_operations as dbo
 from utils import get_user_history_path
 
-LAST_QUERY_RESULT = None
-
 ################################################################################
 # Primary CLI/UI for RepoMan!
 ################################################################################
 @click.command()
+@click.option('--query', help='Query to execute on startup?', type=str)
 @click.option('--verbose/--no-verbose', default=False, help='Verbose mode?')
-def cli(verbose: bool) -> None:
+def cli(verbose: bool, query: Optional[str]) -> None:
 
-    # Setup and introduction...
     console = Console()
-    console.clear()
-    print(Figlet(font='standard').renderText('Repo-Man'))
-    console.print(c.INTRODUCTION)
 
-    with dbp.database.connection_context() as ctx:
-        status = dbo.status()
-        if status.total_docs:
-            console.print(f"[bold italic]{status.total_docs:,d}[/bold italic] documents to query from.")
+    # If we have a query to run from the command-line, do it,
+    # otherwise, put out the regular introductory banner.
+    if query:
+        with dbp.database.connection_context() as ctx:
+            message_or_none = get_command_method('query')(console, query_string=query)
+            if message_or_none:
+                console.print(message_or_none)
+    else:
+        console.clear()
+        print(Figlet(font='standard').renderText('Repo-Man'))
+        console.print(c.INTRODUCTION)
+        with dbp.database.connection_context() as ctx:
+            status = dbo.status()
+            if status.total_docs:
+                console.print(f"[bold italic]{status.total_docs:,d}[/bold italic] documents to query from.")
 
-    # Prompt session allow commands over sessions (!)
+    # Setup our prompt session allow commands over sessions (!)
     session = PromptSession(history=FileHistory(get_user_history_path()))
 
     while True:
@@ -46,63 +52,39 @@ def cli(verbose: bool) -> None:
             console.print("[italic]Goodbye![/]")
             break
 
-        if response.lower() in (".exit",".quit"):  # Done?
+        if response.lower() in (".exit",):  # Done?
             console.print("[italic]Goodbye![/]")
             break
 
         if response:  # As Ahhhnold would say...DOO EET!
             with dbp.database.connection_context() as ctx:
-                execute(verbose, response)
+                execute(verbose, console, response)
 
 
-def execute(verbose: bool, response: str) -> bool:
+def execute(verbose: bool, console: Console, response: str) -> bool:
     """Execute the "response" provided, determining whether or not
     it's a "command" or "simply" a query to be executed."""
-    console = Console()      # Every command is going to put out to the console.
-    global LAST_QUERY_RESULT
 
-    if response.startswith('.') and response.lower() != '.q':
+    if response.startswith('.'):
         ##########################################################
         # A non-query repoman command
         ##########################################################
         command = response[1:]
-        command_method = get_command_module(command).command
+        command_method = get_command_method(command)
         if command_method:
             console.clear() # We're good, execute it!
             result = command_method(console, verbose=verbose)
         else:
             console.print(f"Sorry, [red bold]{response}[/red bold] is not a known command (.help to list them)")
-
-    elif response.startswith("!"):
-        ##########################################################
-        # A document command
-        ##########################################################
-        try:
-            selected_file = int(response[1:])
-        except ValueError:
-            console.print(f"Sorry, [red bold]{response}[/red bold] isn't a valid document open command,")
-            console.print(f"Must be valid integer within the range of 1 -> {len(LAST_QUERY_RESULT)}.")
-            return False
-
-        # Lookup and open the "selected_fileth" file in the last query!
-        try:
-            path_full = LAST_QUERY_RESULT[selected_file-1].path_full
-        except IndexError:
-            console.print(f"Sorry, [red bold]{response}[/red bold] must be between 1 and {len(LAST_QUERY_RESULT)}.")
-            return False
-
-        # Open the file based on the local system's file associations
-        home_dir = os.system(f'open "{path_full}"')
-
     else:
         ##########################################################
-        # A query (either short or "advanced"
+        # A query (either short or "advanced")
         ##########################################################
-        command_method = get_command_module('query').command
         query_string = None if response.lower() == '.q' else response
-        LAST_QUERY_RESULT = command_method(console, query_string=query_string)
+        get_command_method('query')(console, query_string=query_string)
 
     return True
+
 
 ################################################################################
 # Cache of modules in the "cli_commands" directory allowing for
@@ -122,12 +104,15 @@ def populate_command_modules_cache() -> None:
 populate_command_modules_cache()
 
 
-def get_command_module(command: str) -> ModuleType:
-    return COMMAND_MODULES.get(command, None)
-
+def get_command_method(command: str) -> callable:
+    module_ = COMMAND_MODULES.get(command, None)
+    if module_:
+        return module_.command
+    return None
 
 def get_command_modules() -> dict[str, ModuleType]:
     return COMMAND_MODULES
+
 
 
 if __name__ == "__main__":

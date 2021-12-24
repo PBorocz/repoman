@@ -46,5 +46,5 @@ def command(console: Console, verbose: bool):
     for (command, description) in sorted(commands):
         console.print(f"[bold]{command:{left_column_width}s}[/] {description}")
 
-    console.print("\nEntries start with '!' are [italic]document[/] commands:")
-    console.print(f"[bold]{'!<i>':{left_column_width}s}[/] Open the file associated with the number from the last query.\n")
+    # console.print("\nEntries start with '!' are [italic]document[/] commands:")
+    # console.print(f"[bold]{'!<i>':{left_column_width}s}[/] Open the file associated with the number from the last query.\n")
