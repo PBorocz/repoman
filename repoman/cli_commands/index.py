@@ -8,7 +8,7 @@ from rich.table import Table
 
 import constants as c
 from cli_utils import get_state, save_state, YesNoValidator, PathValidator, sub_prompt
-from index import index
+from index import index, cleanup
 from utils import get_user_history_path
 
 
@@ -39,13 +39,13 @@ def command(console: Console, verbose: bool) -> bool:
 
     # Should we overwrite existing entries?
     index_parms.force = _sub_prompt(
-        'Force [y/n]',
+        'Force (y/n)',
         index_parms.force,
         validator=YesNoValidator())
 
     # Should we overwrite existing entries?
     index_parms.verbose = _sub_prompt(
-        'Verbose [y/n]',
+        'Verbose (y/n)',
         index_parms.verbose,
         validator=YesNoValidator())
 
@@ -55,7 +55,10 @@ def command(console: Console, verbose: bool) -> bool:
     ############################################################
     # DO IT!
     ############################################################
-    num_indexed, num_cleansed, time_taken = index(index_parms)
+    num_indexed, time_taken = index(console, index_parms)
+
+    # Cleanup any documents in the database that no longer appear on disk.
+    num_cleansed = cleanup()
 
     # Print a nice summary of what we did (based on what occurred)
     table = Table(show_header=False, box=c.DEFAULT_BOX_STYLE)
@@ -69,9 +72,10 @@ def command(console: Console, verbose: bool) -> bool:
         else:
             metric_desc = "Seconds per Doc"
             metric_value = 1.0 / metric_value
-        table.add_row(f"Documents Indexed", f"[bold]{num_indexed:,d}[/bold]")
-        table.add_row(f"Total Time (sec)" , f"[bold]{time_taken:.4f}[/bold]")
-        table.add_row(f"{metric_desc}"    , f"[bold]{metric_value:.4f}[/bold]")
+        table.add_row(f"Documents Indexed:", f"[bold]{num_indexed:,d}[/bold]")
+        table.add_row(f"Total Time (sec):" , f"[bold]{time_taken:.4f}[/bold]")
+        table.add_row(f"{metric_desc}:"    , f"[bold]{metric_value:.4f}[/bold]")
+
     if num_cleansed:
         table.add_row(f"Entries Cleaned"  , f"[bold]{num_cleansed:,d}[/bold]")
 
@@ -79,5 +83,5 @@ def command(console: Console, verbose: bool) -> bool:
         console.print(table)
         return True
 
-    console.print("\n[bold]Nothing[/bold] done.\n")
+    console.print("\nOk, [bold]Nothing[/bold] done.\n")
     return False

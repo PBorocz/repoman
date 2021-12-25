@@ -180,7 +180,7 @@ def open_file(console: Console, doc_id: int) -> Optional[str]:
         return None
     doc = docs[0]
 
-    # Get information about the file...
+    # Display information about the file..
     path_ = Path(doc.path)
     stat_ = os.stat(path_)
     size_ = stat_.st_size
@@ -190,9 +190,10 @@ def open_file(console: Console, doc_id: int) -> Optional[str]:
     console.print(f"   {'File':16s} {path_.name}")
     console.print(f"   {'Last Modified':16s} {doc.last_mod}")
     console.print(f"   {'Size':16s} {humanify_size(size_)}")
-    yes_no_other = Prompt.ask("Open this file \[y/n]?")
 
+    # Confirm that we want to open it!
+    yes_no_other = Prompt.ask("Open this file (y/[b]n[/b])?")
     if yes_no_other and yes_no_other.lower().startswith("y"):
+        return f"Opening file: [b]{path_.name}..."
         os.system(f'open "{path_}"')
-        return f"Opening file: [b]{path_full.name}..."
     return None

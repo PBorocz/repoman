@@ -113,7 +113,8 @@ def upsert_doc(verbose: bool, a_doc: AnonymousObj) -> int:
     # If we didn't get any text, we still want to make an entry so we know
     # that we've considered the path already.
 
-    # Do the into the "master" table:
+    # Do the insert into the "master" table
+    # (irrespective of whether or not we have text to index)
     doc = Document(
         path     = str(a_doc.path_),
         suffix   = a_doc.suffix,
@@ -122,14 +123,14 @@ def upsert_doc(verbose: bool, a_doc: AnonymousObj) -> int:
     )
     doc.save()
 
-    # Now, insert the body content of the file into the text search table
-    # (note that body could be essentially empty, ie. '')
+    # Do we have any body content to insert into the text search table?
     cleansed = a_doc.body.replace("'", '"').replace("\n", "") if a_doc.body else ""
-    DocumentFTS.insert({
-        DocumentFTS.rowid : doc.id,
-        DocumentFTS.path  : str(a_doc.path_),
-        DocumentFTS.body  : cleansed,
-    }).execute()
+    if cleansed:
+        DocumentFTS.insert({
+            DocumentFTS.rowid : doc.id,
+            DocumentFTS.path  : str(a_doc.path_),
+            DocumentFTS.body  : cleansed,
+        }).execute()
 
     # Do we have any tags to handle?
     if a_doc.tags:

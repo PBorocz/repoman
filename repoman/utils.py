@@ -20,77 +20,84 @@ class AnonymousObj:
 
 class progressIndicator:
     """Progress indicator for command line display use."""
-    def __init__(self, level='medium', title='', noIntermediateStats=0, noSymbols=False):
-        self.__noIntermediateStats = noIntermediateStats
-        self.__count       = 0
-        self.__timeStarted = time.time()
-        self.noSymbols     = noSymbols
-        self.symbolMinor   = '.'
-        self.symbolMajor   = '+'
+    def __init__(self, level='medium', title='', intermediate_stats=0, noSymbols=False):
+        self.intermediate_stats = intermediate_stats
+        self.count        = 0
+        self.time_started = time.time()
+        self.time_taken   = 0
+        self.noSymbols    = noSymbols
+        self.symbolMinor  = '.'
+        self.symbolMajor  = '+'
         if title:
             print(title)
         if level.lower() == 'mondohigh':
-            self._major        = 50000
-            self._minor        = 5000
-            self._row          = 1000
+            self._major  = 50000
+            self._minor  = 5000
+            self._row    = 1000
         elif level.lower() == 'veryhigh':
-            self._major        = 5000
-            self._minor        = 500
-            self._row          = 100
+            self._major  = 5000
+            self._minor  = 500
+            self._row    = 100
         elif level.lower() == 'high':
-            self._major        = 500
-            self._minor        = 50
-            self._row          = 10
+            self._major  = 500
+            self._minor  = 50
+            self._row    = 10
         elif level.lower() == 'medium':
-            self._major        = 250
-            self._minor        = 25
-            self._row          = 5
+            self._major  = 250
+            self._minor  = 25
+            self._row    = 5
         else:
-            self._major        = 50
-            self._minor        = 5
-            self._row          = 1
+            self._major  = 50
+            self._minor  = 5
+            self._row    = 1
 
-    def _printStatistics(self):
-        if self.__count:
-            spt = (time.time() - self.__timeStarted) / self.__count
+
+    def update(self) -> None:
+        self.count = self.count + 1
+        if (self.count % self._major) == 0 and self.count > (self._major - 1):
+            if not self.noSymbols:
+                print(self.symbolMajor, end='')
+
+            if not self.intermediate_stats:
+                self._printStatistics(time.time())
+
+        elif (self.count % self._minor) == 0 and self.count > (self._minor - 1):
+            if not self.noSymbols:
+                print(self.symbolMajor, end='')
+
+        elif (self.count % self._row  ) == 0 and self.count > 0:
+            if not self.noSymbols:
+                print(self.symbolMinor, end='')
+        sys.stdout.flush()
+
+
+    def final(self, print_statistics=True) -> None:
+        time_ = time.time()
+        if print_statistics:
+            self._printStatistics(time_)
+        else:
+            sys.stdout.write("\n") # Wrap up the display nicely.
+
+        # Set the total time taken for anyone who wants it afterwards.
+        self.time_taken = time_ - self.time_started
+        sys.stdout.flush()
+
+
+    def _printStatistics(self, arg_time) -> float:
+        if self.count:
+            spt = (arg_time - self.time_started) / self.count
             tps = spt
             if spt:
                 tps = 1 / spt
                 # Print either seconds per txn or txns per second depending
                 # on whichever is larger..
                 if tps > spt:
-                    print(" (%7d @ %-8.2f tps)" % (self.__count, tps))
+                    print(" (%7d @ %-8.2f tps)" % (self.count, tps))
                 else:
-                    print(" (%7d @ %-8.2f spt)" % (self.__count, spt))
+                    print(" (%7d @ %-8.2f spt)" % (self.count, spt))
             else:
-                print(" (%7d @ %8s spt)" % (self.__count, '-----.--'))
-
-    def update(self):
-        if   (self.__count % self._major) == 0 and self.__count > (self._major - 1):
-            if not self.noSymbols:
-                print(self.symbolMajor, end='')
-            if not self.__noIntermediateStats:
-                self._printStatistics()
-
-        elif (self.__count % self._minor) == 0 and self.__count > (self._minor - 1):
-            if not self.noSymbols:
-                print(self.symbolMajor, end='')
-
-        elif (self.__count % self._row  ) == 0 and self.__count > 0:
-            if not self.noSymbols:
-                print(self.symbolMinor, end='')
-        self.__count = self.__count + 1
-        sys.stdout.flush()
-
-    def get_count(self):
-        return self.__count
-
-    def final(self):
-        print()
-        self._printStatistics()
-        sys.stdout.flush()
-
-pi = progressIndicator
+                print(" (%7d @ %8s spt)" % (self.count, '-----.--'))
+            sys.stdout.flush()
 
 
 class timer(object):
@@ -137,10 +144,9 @@ def retry(ExceptionToCheck, tries=5, delay=1, backoff=2, logger=None) -> Callabl
                 except ExceptionToCheck:
                     msg = f"{str(ExceptionToCheck)}, Retrying in {mdelay:.2f} seconds..."
                     if logger:
-                        #logger.exception(msg) # would print stack trace
                         logger.warning(msg)
-                    else:
-                        print(msg)
+                    # else:
+                    #     print(msg)
                     time.sleep(mdelay)
                     mtries -= 1
                     mdelay *= backoff

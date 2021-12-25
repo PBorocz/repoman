@@ -14,7 +14,34 @@ if not REPOMAN_PATH.exists():
 DB_PATH = REPOMAN_PATH / Path(REPOMAN_DB)
 DB_DATETIME_FORMAT = '%Y-%m-%d %H:%M'
 
-# CLI UI support constants
+# Indexing constants:
+SKIP_DIRS = (
+    # Directories to SKIP indexing on..
+    ".git",
+    ".hg",
+    ".venv",
+    "venv",
+    "_vm",
+    ".vm",
+    "__pycache__",
+    "node_modules",
+    "zzArchive",
+)
+
+INCLUDE_EXTENSIONS = (
+    # File extensions TO index, rest are skipped.
+    ".md",
+    ".txt",
+    ".org",
+    ".gif",
+    ".pdf",
+    ".mp4", ".mov",
+    ".jpg", ".jepg", ".jpg_large",
+    ".png",
+    ".py",
+)
+
+# CLI UI support constants:
 def _italic(str_):
     return f"[italic]{str_}[/italic]"
 

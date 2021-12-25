@@ -4,67 +4,50 @@ import multiprocessing
 import os
 import re
 import sys
-import time
 from collections import defaultdict
 from contextlib import suppress
-from copy import copy
-from functools import partial
 from pathlib import Path
+from random import random
 from typing import Iterable, Optional
 
 from pdfminer.high_level import extract_text
 from pdfminer.pdftypes import PDFException
 from rich import print
-from rich.progress import track
+from rich.console import Console
+from rich.prompt import Prompt
 
 import constants as c
 import db_logical as dbl
 import db_physical as dbp
 import db_operations as dbo
-from utils import AnonymousObj, progressIndicator, timer
+from utils import AnonymousObj, progressIndicator
 from adts import IndexCommandParameters
-
-SKIP_DIRS = (
-    ".git",
-    ".hg",
-    ".venv",
-    "venv",
-    "_vm",
-    ".vm",
-    "__pycache__",
-    "node_modules",
-    "zzArchive",
-)
-
-INCLUDE_EXTENSIONS = (
-    ".md",
-    ".txt",
-    ".org",
-    ".gif",
-    ".pdf",
-    ".mp4", ".mov",
-    ".jpg", ".jepg", ".jpg_large",
-    ".png",
-    ".py",
-)
 
 FILENAME_TAG_SEPARATOR = " -- "
 FILE_WITH_TAGS_REGEX   = re.compile(r'(.+?)' + FILENAME_TAG_SEPARATOR + r'(.+?)(\.(\w+))??$')
 YYYY_MM_DD_PATTERN     = re.compile(r'^(\d{4,4})-([01]\d)-([0123]\d)[- _T]')
+PROGRESS = None
 
 
 ################################################################################
-# CORE METHOD: Get an iterator of files to be indexed and return the number that worked.
+# CORE METHOD: Get files to be indexed and return the number that worked!
 ################################################################################
-def index(index_parms: IndexCommandParameters) -> tuple[int, float]:
+def index(console: Console, index_parms: IndexCommandParameters) -> tuple[Optional[int], Optional[float]]:
+    global PROGRESS
 
     b_force   = False if not index_parms.force   or not index_parms.force.lower().startswith('y') else True
     b_verbose = False if not index_parms.verbose or not index_parms.verbose.lower().startswith('y') else True
 
+    # Gather the list of paths that are appropriate to index (reflecting parameters provided)
     paths_to_index = _paths_to_index(
         Path(index_parms.root).expanduser().resolve(),
         index_parms.suffix,
-        b_force)
+        b_force)[0:100]
+
+    # Confirm that we're ready to do this?
+    yes_no_other = Prompt.ask(f"\nIndex {len(paths_to_index):,d} files? (y/[b]n[/b])?")
+    if not yes_no_other or not yes_no_other.lower().startswith("y"):
+        return None, None
 
     # Set up our processing pool based on:
     # 1 - the number of documents to index and
@@ -72,18 +55,32 @@ def index(index_parms: IndexCommandParameters) -> tuple[int, float]:
     pool_size = (multiprocessing.cpu_count() * 2) - 1 if len(paths_to_index) > 100 else 1
     pool = multiprocessing.Pool(processes=pool_size)
 
-    # ..Let 'em loose!
-    start = time.time()
-    pool_outputs = pool.map(partial(_index, b_verbose), paths_to_index)
 
-    # ..and wait for all to finish.
+    # Let 'em loose!
+    PROGRESS = progressIndicator(level="low")
+    for path_ in paths_to_index:
+        pool.apply_async(
+            _index,
+            args=[b_verbose, path_],
+            callback=callback_update,
+            error_callback=callback_error
+        )
+
+    # ..and wait for all of 'em to finish.
     pool.close()
     pool.join()
+    PROGRESS.final(print_statistics=False)
 
-    num_cleansed = cleanup()
+    # Return the number of file paths we indexed and how long it took!
+    return PROGRESS.count, PROGRESS.time_taken
 
-    # Return the number of file paths we indexed *and* how long it took!
-    return len(pool_outputs), num_cleansed, time.time() - start
+
+def callback_update(retval):
+    PROGRESS.update()
+
+
+def callback_error(exception):
+    sys.stderr.write(str(exception))
 
 
 def _paths_to_index(
@@ -103,7 +100,7 @@ def _paths_to_index(
     with dbp.database.connection_context() as ctx:
         paths_already_indexed = dbo.get_paths_already_indexed()
 
-    for path_ in walker(path_dir, arg_suffix, SKIP_DIRS, INCLUDE_EXTENSIONS):
+    for path_ in walker(path_dir, arg_suffix, c.SKIP_DIRS, c.INCLUDE_EXTENSIONS):
         if arg_force:
             return_.append(path_)  # Easy, index every file that passes our file "filters"!
             continue
@@ -316,6 +313,7 @@ def get_org_links(path_: Path, line: str) -> list[str]:
             _, line = line.split(']]', 1)  # Any more on the line?
 
     return return_
+
 
 def cleanup() -> int:
     """Go through all the documents currently stored and make sure that all of their
