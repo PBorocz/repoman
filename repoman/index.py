@@ -42,7 +42,7 @@ def index(console: Console, index_parms: IndexCommandParameters) -> tuple[Option
     paths_to_index = _paths_to_index(
         Path(index_parms.root).expanduser().resolve(),
         index_parms.suffix,
-        b_force)[0:100]
+        b_force)
 
     # Confirm that we're ready to do this?
     yes_no_other = Prompt.ask(f"\nIndex {len(paths_to_index):,d} files? (y/[b]n[/b])?")
@@ -54,7 +54,6 @@ def index(console: Console, index_parms: IndexCommandParameters) -> tuple[Option
     # 2 - one less than the number of cores we think are available.
     pool_size = (multiprocessing.cpu_count() * 2) - 1 if len(paths_to_index) > 100 else 1
     pool = multiprocessing.Pool(processes=pool_size)
-
 
     # Let 'em loose!
     PROGRESS = progressIndicator(level="low")
@@ -108,17 +107,14 @@ def _paths_to_index(
         # Have we not indexed this file before?
         is_path_not_indexed = path_ not in paths_already_indexed
 
-        # Has file has been modified more recently than our stored indexed version?
-        lmod_doc = paths_already_indexed.get(path_, None)
-        has_doc_been_updated = get_last_mod(path_) > lmod_doc if lmod_doc else None
-
         # Decide to take/not take the path under consideration
         if is_path_not_indexed:
             return_.append(path_)  # Easy case, we haven't seen it yet!
             continue
         else:
-            # We've already seen it...but...
-            # has it been updated since we last indexed it?
+            # We've already seen it, but, has it been updated since we last indexed it?
+            lmod_doc = paths_already_indexed.get(path_, None)
+            has_doc_been_updated = get_last_mod(path_) > lmod_doc if lmod_doc else None
             if has_doc_been_updated:
                 return_.append(path_)
 
