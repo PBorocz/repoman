@@ -6,10 +6,13 @@ from typing import Callable
 
 
 def get_user_history_path():
-    history_path = Path("~/.config/repoman/.cli_history").expanduser()
-    if not history_path.exists() or not history_path.is_file():
-        open(history_path, "a").close()
-    return history_path
+    history_path = Path("~/.config/repoman").expanduser()
+    history_path.mkdir(parents=True, exist_ok=True)
+
+    history_file = history_path / Path(".cli_history")
+    if not history_file.exists():
+        open(history_file, "a").close()
+    return history_file
 
 
 class AnonymousObj:

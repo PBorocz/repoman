@@ -6,7 +6,6 @@ from typing import Optional
 
 import click
 from prompt_toolkit import PromptSession, prompt
-from prompt_toolkit.completion import PathCompleter
 from prompt_toolkit.history import FileHistory
 from pyfiglet import Figlet
 from rich.console import Console
